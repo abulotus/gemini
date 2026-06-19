@@ -4,6 +4,8 @@ import numpy as np
 import zxing
 import os
 from paddleocr import PaddleOCR
+import json
+from fastapi.responses import Response
 
 app = FastAPI()
 reader = zxing.BarCodeReader()
@@ -85,7 +87,6 @@ def decode_barcode_raw(image_bytes: bytes) -> str:
 def fix_and_parse_barcode(raw_str: str) -> dict:
     """Decodes string bytes safely to Windows-1256 Arabic and splits demographic fields."""
     try:
-        # Re-encode mistake Latin-1 payload back to bytes, then force decode cleanly as Arabic Windows-1256
         cleaned_text = raw_str.encode('latin1', errors='ignore').decode('windows-1256', errors='ignore')
         parts = cleaned_text.split('#')
         
@@ -133,17 +134,28 @@ async def extract_full_id(front_file: UploadFile, back_file: UploadFile):
             if front_data["national_number"] == "Not Found": 
                 front_data["national_number"] = barcode_parsed_dict["national_number"]
             if front_data["surname"] == "Not Found":
-                # Fallback: parse surname string segment cleanly out of full name lineage field
                 full_name = barcode_parsed_dict["full_name_lineage"]
                 front_data["surname"] = full_name.split(' ')[-1] if ' ' in full_name else full_name
         
-        return {
+        # 4. Create the structured dict payload inside the try block
+        payload = {
             "status": "success",
             "extracted_data": {
                 "front_side": front_data,
                 "back_side": back_data,
-                "barcode_arabic_extracted": barcode_parsed_dict if barcode_parsed_dict else "Not Readable"
+                "barcode_arabic_extracted": barcode_parsed_dict
             }
         }
+        
+        # Serialize to string with UTF-8 Arabic characters preserved
+        json_string = json.dumps(payload, ensure_ascii=False, indent=4)
+        
+        # Return as a downloadable text file attachment
+        return Response(
+            content=json_string, 
+            media_type="text/plain",
+            headers={"Content-Disposition": "attachment; filename=id_extract_utf8.txt"}
+        )
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
