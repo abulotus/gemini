@@ -45,29 +45,49 @@ async def decode_barcode(file: UploadFile = File(...)):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image file format.")
 
-    # Crop the image to target the barcode on the back of a card
-    width, height = image.size
-    left = 0
-    top = int(height * 0.60)
-    right = width
-    bottom = height
-    cropped_image = image.crop((left, top, right, bottom))
+    if image.mode in ("RGBA", "P"):
+        image = image.convert("RGB")
 
-    # Save to a safe absolute path inside the /code working directory
-    temp_filename = "/code/temp_crop.png"
-    cropped_image.save(temp_filename)
-
+    # --- EXPERIMENT: Try decoding the WHOLE image first before cropping ---
+    temp_filename = "/code/temp_full.png"
+    image.save(temp_filename)
+    
     try:
         barcode = reader.decode(temp_filename)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"ZXing internal error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"ZXing execution failure: {str(e)}")
     finally:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
 
-    if barcode and barcode.parsed:
-        raw_data = barcode.parsed
+    # --- FALLBACK: If whole image fails, try your targeted crop ---
+    if not barcode or not (barcode.parsed or barcode.raw):
+        print("⚠️ Full image scan yielded nothing. Attempting 60% bottom crop fallback...")
+        width, height = image.size
+        cropped_image = image.crop((0, int(height * 0.60), width, height))
         
+        temp_crop_filename = "/code/temp_crop.png"
+        cropped_image.save(temp_crop_filename)
+        try:
+            barcode = reader.decode(temp_crop_filename)
+        finally:
+            if os.path.exists(temp_crop_filename):
+                os.remove(temp_crop_filename)
+
+    # --- DATA PARSING STAGE ---
+    if barcode:
+        # Extract string data using raw fallback if parsed is missing
+        raw_data = barcode.parsed if barcode.parsed else barcode.raw
+        
+        if not raw_data:
+            return {
+                "success": False,
+                "message": f"Barcode framework metadata detected ({barcode.format}), but no inner text stream was recovered."
+            }
+
+        print(f"🎉 Raw string extracted: {raw_data}")
+
+        # Text encoding recovery matrices
         try:
             fixed_data = raw_data.encode('iso-8859-1').decode('windows-1256')
         except Exception:
@@ -88,7 +108,6 @@ async def decode_barcode(file: UploadFile = File(...)):
                 "birth_place_and_date": parts[4],
                 "national_number": parts[5]
             }
-            
             try:
                 birth_info = parts[4].split(' ')
                 useful_profile["birth_place"] = birth_info[0]
@@ -105,8 +124,9 @@ async def decode_barcode(file: UploadFile = File(...)):
     else:
         return {
             "success": False,
-            "message": "Barcode found, but could not be cleanly decoded."
+            "message": "No barcode layout engine could detect a pattern in this image. Check lighting or resolution."
         }
+
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
