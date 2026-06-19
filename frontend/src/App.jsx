@@ -360,9 +360,9 @@ const idFrameStyle = {
 const barcodeFrameStyle = {
   position: 'absolute',
   left: '20%',
-  top: '70%',
-  width: '62%',
-  height: '13%',
+  top: '69%',
+  width: '60%',
+  height: '10%',
   border: '4px dashed #22c55e',
   borderRadius: 8,
   boxSizing: 'border-box',
