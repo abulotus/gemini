@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 
 const API_URL =
@@ -16,44 +16,106 @@ function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
- const startCamera = async () => {
-  try {
-    setError(null);
-    setResult(null);
-    setCameraOpen(true);
+  useEffect(() => {
+    if (!cameraOpen) return;
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-      audio: false,
-    });
+    const attachStream = async () => {
+      if (!videoRef.current || !streamRef.current) return;
 
-    streamRef.current = stream;
+      try {
+        videoRef.current.srcObject = streamRef.current;
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        videoRef.current.muted = true;
 
-    setTimeout(() => {
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        await videoRef.current.play();
+      } catch (err) {
+        console.error('Video play error:', err);
+        setError(`Camera opened but preview failed: ${err.message}`);
       }
-    }, 100);
-  } catch (err) {
-    console.error(err);
-    setCameraOpen(false);
+    };
 
-    if (err.name === 'NotAllowedError') {
-      setError('Camera permission was denied. Please allow camera access.');
-    } else if (err.name === 'NotFoundError') {
-      setError('No camera found on this device.');
-    } else if (err.name === 'NotReadableError') {
-      setError('Camera is already in use by another app.');
-    } else {
-      setError(`Could not open camera: ${err.message}`);
+    setTimeout(attachStream, 200);
+  }, [cameraOpen]);
+
+  const startCamera = async () => {
+    try {
+      setError(null);
+      setResult(null);
+      setPreview(null);
+      setFile(null);
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+      setCameraOpen(true);
+    } catch (err) {
+      console.error('Camera error:', err);
+      setCameraOpen(false);
+      setError(`Could not open camera: ${err.name} - ${err.message}`);
     }
-  }
-};
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+    }
+
+    streamRef.current = null;
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    setCameraOpen(false);
+  };
+
+  const captureImage = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas) {
+      setError('Camera preview is not ready.');
+      return;
+    }
+
+    if (!video.videoWidth || !video.videoHeight) {
+      setError('Camera is open but video is not ready yet. Wait 1 second and try again.');
+      return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setError('Could not capture image.');
+          return;
+        }
+
+        const capturedFile = new File([blob], 'syrian-id-barcode.jpg', {
+          type: 'image/jpeg',
+        });
+
+        setFile(capturedFile);
+        setPreview(URL.createObjectURL(blob));
+        setResult(null);
+        setError(null);
+        stopCamera();
+      },
+      'image/jpeg',
+      0.95
+    );
+  };
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -72,7 +134,6 @@ function App() {
 
     try {
       const response = await axios.post(API_URL, formData);
-
       console.log(response.data);
       setResult(response.data);
     } catch (err) {
@@ -126,28 +187,21 @@ function App() {
               overflow: 'hidden',
             }}
           >
-           <video
-  ref={videoRef}
-  autoPlay
-  playsInline
-  muted
-  controls={false}
-  style={{
-    width: '100%',
-    display: 'block',
-  }}
-/>
-
-            <div
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              controls={false}
               style={{
-                position: 'absolute',
-                inset: 0,
-                background: 'rgba(0,0,0,0.22)',
-                pointerEvents: 'none',
+                width: '100%',
+                minHeight: 300,
+                background: '#000',
+                display: 'block',
+                objectFit: 'cover',
               }}
             />
 
-            {/* Outer card guide */}
             <div
               style={{
                 position: 'absolute',
@@ -162,7 +216,6 @@ function App() {
               }}
             />
 
-            {/* Barcode guide */}
             <div
               style={{
                 position: 'absolute',
@@ -316,34 +369,13 @@ function App() {
 
               {result.profile && (
                 <div style={{ marginTop: 15 }}>
-                  <p>
-                    <strong>First Name:</strong>{' '}
-                    {result.profile.first_name || ''}
-                  </p>
-                  <p>
-                    <strong>Last Name:</strong>{' '}
-                    {result.profile.last_name || ''}
-                  </p>
-                  <p>
-                    <strong>Father Name:</strong>{' '}
-                    {result.profile.father_name || ''}
-                  </p>
-                  <p>
-                    <strong>Mother Name:</strong>{' '}
-                    {result.profile.mother_name || ''}
-                  </p>
-                  <p>
-                    <strong>Birth Place:</strong>{' '}
-                    {result.profile.birth_place || ''}
-                  </p>
-                  <p>
-                    <strong>Birth Date:</strong>{' '}
-                    {result.profile.birth_date || ''}
-                  </p>
-                  <p>
-                    <strong>National Number:</strong>{' '}
-                    {result.profile.national_number || ''}
-                  </p>
+                  <p><strong>First Name:</strong> {result.profile.first_name || ''}</p>
+                  <p><strong>Last Name:</strong> {result.profile.last_name || ''}</p>
+                  <p><strong>Father Name:</strong> {result.profile.father_name || ''}</p>
+                  <p><strong>Mother Name:</strong> {result.profile.mother_name || ''}</p>
+                  <p><strong>Birth Place:</strong> {result.profile.birth_place || ''}</p>
+                  <p><strong>Birth Date:</strong> {result.profile.birth_date || ''}</p>
+                  <p><strong>National Number:</strong> {result.profile.national_number || ''}</p>
                 </div>
               )}
             </>
