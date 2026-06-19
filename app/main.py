@@ -9,7 +9,7 @@ app = FastAPI(title="PaddleOCR Arabic API Pipeline")
 
 # 2. Initialize PaddleOCR core engine (forces cache download on first API call)
 # Using 'ar' for Arabic and enabling the direction/angle classifier
-ocr = PaddleOCR(use_angle_cls=True, lang='ar')
+ocr = PaddleOCR(use_angle_cls=True, lang='ar', use_mp=False)
 
 @app.post("/ocr")
 async def process_ocr(file: UploadFile):
