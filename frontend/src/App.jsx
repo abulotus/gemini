@@ -49,13 +49,17 @@ function App() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 3840 },
+          height: { ideal: 2160 },
         },
         audio: false,
       });
 
       const track = stream.getVideoTracks()[0];
+      
+
+console.log("Camera settings:", track.getSettings());
+console.log("Video size:", videoRef.current?.videoWidth, videoRef.current?.videoHeight);
       const capabilities = track.getCapabilities?.();
 
       if (capabilities?.focusMode?.includes('continuous')) {
@@ -175,6 +179,24 @@ function App() {
   });
 };
 
+const handleFileCapture = (e) => {
+  const selectedFile = e.target.files?.[0];
+
+  if (!selectedFile) return;
+
+  setFile(selectedFile);
+  setPreview(URL.createObjectURL(selectedFile));
+
+  console.log(
+    "Photo size:",
+    selectedFile.size / 1024 / 1024,
+    "MB"
+  );
+
+  setResult(null);
+  setError(null);
+};
+
   const captureImage = async () => {
     try {
       const blob = await cropBarcodeFromVideo();
@@ -232,6 +254,31 @@ function App() {
       }}
     >
       <h1>Syrian ID Barcode Decoder</h1>
+
+
+  <label
+  style={{
+    display: 'block',
+    marginTop: 10,
+    padding: 14,
+    background: '#2563eb',
+    color: 'white',
+    textAlign: 'center',
+    borderRadius: 8,
+    cursor: 'pointer',
+  }}
+>
+  Take High Quality Photo
+
+  <input
+    type="file"
+    accept="image/*"
+    capture="environment"
+    onChange={handleFileCapture}
+    style={{ display: 'none' }}
+  />
+</label>
+
 
       {!cameraOpen && (
         <button type="button" onClick={startCamera} style={primaryButton}>
