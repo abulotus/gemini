@@ -3,3 +3,5 @@ uvicorn
 gunicorn
 Pillow
 zxing
+python-multipart
+
