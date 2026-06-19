@@ -16,75 +16,44 @@ function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  const startCamera = async () => {
-    try {
-      setError(null);
-      setResult(null);
+ const startCamera = async () => {
+  try {
+    setError(null);
+    setResult(null);
+    setCameraOpen(true);
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
 
-      streamRef.current = stream;
+    streamRef.current = stream;
 
+    setTimeout(() => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play();
       }
-
-      setCameraOpen(true);
-    } catch (err) {
-      console.error(err);
-      setError('Could not open camera. Please allow camera permission.');
-    }
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-    }
-
-    streamRef.current = null;
+    }, 100);
+  } catch (err) {
+    console.error(err);
     setCameraOpen(false);
-  };
 
-  const captureImage = () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-
-    if (!video || !canvas) return;
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          setError('Could not capture image.');
-          return;
-        }
-
-        const capturedFile = new File([blob], 'syrian-id-barcode.jpg', {
-          type: 'image/jpeg',
-        });
-
-        setFile(capturedFile);
-        setPreview(URL.createObjectURL(blob));
-        setResult(null);
-        setError(null);
-        stopCamera();
-      },
-      'image/jpeg',
-      0.95
-    );
-  };
+    if (err.name === 'NotAllowedError') {
+      setError('Camera permission was denied. Please allow camera access.');
+    } else if (err.name === 'NotFoundError') {
+      setError('No camera found on this device.');
+    } else if (err.name === 'NotReadableError') {
+      setError('Camera is already in use by another app.');
+    } else {
+      setError(`Could not open camera: ${err.message}`);
+    }
+  }
+};
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -157,16 +126,17 @@ function App() {
               overflow: 'hidden',
             }}
           >
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              style={{
-                width: '100%',
-                display: 'block',
-              }}
-            />
+           <video
+  ref={videoRef}
+  autoPlay
+  playsInline
+  muted
+  controls={false}
+  style={{
+    width: '100%',
+    display: 'block',
+  }}
+/>
 
             <div
               style={{
