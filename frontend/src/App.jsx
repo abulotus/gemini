@@ -10,6 +10,7 @@ function App() {
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
+
     if (selectedFile) {
       setFile(selectedFile);
       setPreview(URL.createObjectURL(selectedFile));
@@ -20,8 +21,9 @@ function App() {
 
   const handleUpload = async (e) => {
     e.preventDefault();
+
     if (!file) {
-      setError("Please select an image first.");
+      setError('Please select an image first.');
       return;
     }
 
@@ -35,53 +37,140 @@ function App() {
     try {
       const response = await axios.post(
         'https://fastapi-container-production-ece7.up.railway.app/decode-barcode',
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
+        formData
       );
+
+      console.log(response.data);
       setResult(response.data);
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.detail || "An error occurred while decoding the barcode.");
+      setError(
+        err.response?.data?.detail ||
+          'An error occurred while decoding the barcode.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: '500px', margin: '40px auto', padding: '20px', fontFamily: 'sans-serif' }}>
+    <div
+      style={{
+        maxWidth: '500px',
+        margin: '40px auto',
+        padding: '20px',
+        fontFamily: 'sans-serif',
+      }}
+    >
       <h1>Barcode Decoder</h1>
-      
+
       <form onSubmit={handleUpload}>
-        <input 
-          type="file" 
-          accept="image/*" 
-          onChange={handleFileChange} 
-        />
-        
+        <input type="file" accept="image/*" onChange={handleFileChange} />
+
         {preview && (
           <div style={{ margin: '20px 0' }}>
-            <img src={preview} alt="Preview" style={{ width: '100%', maxHeight: '200px', objectFit: 'contain' }} />
+            <img
+              src={preview}
+              alt="Preview"
+              style={{
+                width: '100%',
+                maxHeight: '200px',
+                objectFit: 'contain',
+              }}
+            />
           </div>
         )}
 
-        <button type="submit" disabled={loading || !file} style={{ width: '100%', padding: '10px', marginTop: '10px' }}>
+        <button
+          type="submit"
+          disabled={loading || !file}
+          style={{
+            width: '100%',
+            padding: '10px',
+            marginTop: '10px',
+          }}
+        >
           {loading ? 'Decoding...' : 'Scan Barcode'}
         </button>
       </form>
 
-      {error && <p style={{ color: 'red', marginTop: '20px' }}>{error}</p>}
+      {error && (
+        <p style={{ color: 'red', marginTop: '20px' }}>
+          {error}
+        </p>
+      )}
 
       {result && (
-        <div style={{ marginTop: '20px', padding: '15px', background: '#f0f0f0', borderRadius: '5px' }}>
+        <div
+          style={{
+            marginTop: '20px',
+            padding: '15px',
+            background: '#f0f0f0',
+            borderRadius: '5px',
+          }}
+        >
           {result.success ? (
             <>
               <h3>🎉 Barcode Detected!</h3>
-              <p><strong>Data:</strong> <code>{result.barcode_data}</code></p>
-              <p><strong>Format:</strong> {result.barcode_type}</p>
+
+              <p>
+                <strong>Format:</strong> {result.format}
+              </p>
+
+              <p>
+                <strong>Decoded Text:</strong>
+              </p>
+
+              <textarea
+                readOnly
+                value={result.decoded_arabic_text || ''}
+                rows={6}
+                style={{
+                  width: '100%',
+                  direction: 'rtl',
+                }}
+              />
+
+              {result.profile && (
+                <div style={{ marginTop: '15px' }}>
+                  <h4>Extracted Profile</h4>
+
+                  <p>
+                    <strong>First Name:</strong>{' '}
+                    {result.profile.first_name || ''}
+                  </p>
+
+                  <p>
+                    <strong>Last Name:</strong>{' '}
+                    {result.profile.last_name || ''}
+                  </p>
+
+                  <p>
+                    <strong>Father Name:</strong>{' '}
+                    {result.profile.father_name || ''}
+                  </p>
+
+                  <p>
+                    <strong>Mother Name:</strong>{' '}
+                    {result.profile.mother_name || ''}
+                  </p>
+
+                  <p>
+                    <strong>Birth Place:</strong>{' '}
+                    {result.profile.birth_place || ''}
+                  </p>
+
+                  <p>
+                    <strong>Birth Date:</strong>{' '}
+                    {result.profile.birth_date || ''}
+                  </p>
+
+                  <p>
+                    <strong>National Number:</strong>{' '}
+                    {result.profile.national_number || ''}
+                  </p>
+                </div>
+              )}
             </>
           ) : (
             <p>⚠️ {result.message}</p>
