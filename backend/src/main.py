@@ -35,16 +35,18 @@ def decode_image_with_tempfile(image: Image.Image):
     temp_filename = None
 
     try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             temp_filename = tmp.name
-            image.save(temp_filename)
+            image.save(temp_filename, format="JPEG", quality=95)
 
         return reader.decode(temp_filename)
 
     finally:
         if temp_filename and os.path.exists(temp_filename):
             os.remove(temp_filename)
-
 
 @app.get("/")
 def read_root():
@@ -129,7 +131,7 @@ async def decode_barcode(file: UploadFile = File(...)):
     }
 
     if profile["birth_place_and_date"]:
-        birth_info = profile["birth_place_and_date"].split(" ")
+        birth_info = profile["birth_place_and_date"].rsplit("  ",1)
 
         if len(birth_info) >= 2:
             profile["birth_place"] = birth_info[0]
