@@ -335,6 +335,7 @@ const cameraBox = {
   background: '#000',
   borderRadius: 14,
   overflow: 'hidden',
+  maxHeight: '260',
 };
 
 const videoStyle = {
