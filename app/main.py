@@ -82,8 +82,8 @@ def decode_barcode(image_bytes: bytes) -> str:
 
 @app.post("/api/extract-id-complete")
 async def extract_full_id(
-    front_file: UploadFile = File(...), 
-    back_file: UploadFile = File(...)
+    front_file: UploadFile, 
+    back_file: UploadFile
 ):
     valid_types = ["image/jpeg", "image/png"]
     if front_file.content_type not in valid_types or back_file.content_type not in valid_types:
