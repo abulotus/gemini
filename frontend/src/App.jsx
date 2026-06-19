@@ -123,10 +123,10 @@ function App() {
       offsetY = (renderedH - displayH) / 2;
     }
 
-    const boxLeft = displayW * 0.10;
-    const boxTop = displayH * 0.22;
-    const boxW = displayW * 0.80;
-    const boxH = displayH * 0.22;
+    const boxLeft = displayW * 0.15;
+const boxTop = displayH * 0.64;
+const boxW = displayW * 0.70;
+const boxH = displayH * 0.12;
 
     const scaleX = videoW / renderedW;
     const scaleY = videoH / renderedH;
@@ -348,10 +348,10 @@ const videoStyle = {
 
 const idFrameStyle = {
   position: 'absolute',
-  left: '10%',
-  top: '50%',
-  width: '85%',
-  height: '30%',
+  left: '8%',
+  top: '48%',
+  width: '84%',
+  height: '32%',
   border: '3px solid #22c55e',
   borderRadius: 16,
   boxSizing: 'border-box',
@@ -360,10 +360,10 @@ const idFrameStyle = {
 
 const barcodeFrameStyle = {
   position: 'absolute',
-  left: '20%',
-  top: '69%',
-  width: '60%',
-  height: '10%',
+  left: '15%',
+  top: '64%',
+  width: '70%',
+  height: '12%',
   border: '4px dashed #22c55e',
   borderRadius: 8,
   boxSizing: 'border-box',
