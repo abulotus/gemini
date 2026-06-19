@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-jre \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /
+WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -21,4 +21,5 @@ EXPOSE 8000
 # 2. python -m uvicorn ensures it boots via the Python interpreter directly rather than the global binary.
 #ENV PYTHONPATH=/workspace
 
-CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+#CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["pytho", "main.py"]
