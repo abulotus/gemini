@@ -48,10 +48,9 @@ async def decode_barcode(file: UploadFile = File(...)):
     if image.mode in ("RGBA", "P"):
         image = image.convert("RGB")
 
-    # --- EXPERIMENT: Try decoding the WHOLE image first before cropping ---
+    # Try full image scan first
     temp_filename = "/code/temp_full.png"
     image.save(temp_filename)
-    
     try:
         barcode = reader.decode(temp_filename)
     except Exception as e:
@@ -60,9 +59,9 @@ async def decode_barcode(file: UploadFile = File(...)):
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
 
-    # --- FALLBACK: If whole image fails, try your targeted crop ---
+    # Fallback to bottom 60% crop if full image yields nothing
     if not barcode or not (barcode.parsed or barcode.raw):
-        print("⚠️ Full image scan yielded nothing. Attempting 60% bottom crop fallback...")
+        print("⚠️ Full scan empty. Running crop fallback...")
         width, height = image.size
         cropped_image = image.crop((0, int(height * 0.60), width, height))
         
@@ -74,57 +73,62 @@ async def decode_barcode(file: UploadFile = File(...)):
             if os.path.exists(temp_crop_filename):
                 os.remove(temp_crop_filename)
 
-    # --- DATA PARSING STAGE ---
+    # --- ENHANCED RETURN ENGINE ---
     if barcode:
-        # Extract string data using raw fallback if parsed is missing
-        raw_data = barcode.parsed if barcode.parsed else barcode.raw
+        # Step 1: Capture whatever raw string engine grabbed
+        raw_text = barcode.parsed if barcode.parsed else barcode.raw
         
-        if not raw_data:
+        if not raw_text:
             return {
                 "success": False,
-                "message": f"Barcode framework metadata detected ({barcode.format}), but no inner text stream was recovered."
+                "message": f"Barcode layout found ({barcode.format}), but no internal text data stream was extracted."
             }
 
-        print(f"🎉 Raw string extracted: {raw_data}")
-
-        # Text encoding recovery matrices
+        # Step 2: Extract Arabic text encodings safely
+        fixed_arabic_text = ""
         try:
-            fixed_data = raw_data.encode('iso-8859-1').decode('windows-1256')
+            fixed_arabic_text = raw_text.encode('iso-8859-1').decode('windows-1256')
         except Exception:
             try:
-                fixed_data = raw_data.encode('iso-8859-1').decode('iso-8859-6')
+                fixed_arabic_text = raw_text.encode('iso-8859-1').decode('iso-8859-6')
             except Exception:
-                fixed_data = raw_data
+                fixed_arabic_text = raw_text # Fallback to original text if both fail
 
-        parts = fixed_data.split('#')
-        useful_profile = {}
+        # Step 3: Split elements dynamically without strict limits
+        parts = fixed_arabic_text.split('#')
         
-        if len(parts) >= 6:
-            useful_profile = {
-                "first_name": parts[0],
-                "last_name": parts[1],
-                "father_name": parts[2],
-                "mother_name": parts[3],
-                "birth_place_and_date": parts[4],
-                "national_number": parts[5]
-            }
+        # Build out a profile structure map safely from whatever parts exist
+        useful_profile = {
+            "first_name": parts[0] if len(parts) > 0 else None,
+            "last_name": parts[1] if len(parts) > 1 else None,
+            "father_name": parts[2] if len(parts) > 2 else None,
+            "mother_name": parts[3] if len(parts) > 3 else None,
+            "birth_place_and_date": parts[4] if len(parts) > 4 else None,
+            "national_number": parts[5] if len(parts) > 5 else None,
+        }
+
+        # Try to break out place and date if field 4 was extracted
+        if useful_profile["birth_place_and_date"]:
             try:
-                birth_info = parts[4].split(' ')
+                birth_info = useful_profile["birth_place_and_date"].split(' ')
                 useful_profile["birth_place"] = birth_info[0]
                 useful_profile["birth_date"] = birth_info[1]
             except Exception:
                 pass
 
+        # Return everything to your React app right away
         return {
             "success": True,
             "format": barcode.format,
-            "profile": useful_profile,
-            "raw_payload": fixed_data
+            "raw_text_from_scanner": raw_text,       # Original unchanged scanner text
+            "decoded_arabic_text": fixed_arabic_text, # Re-mapped Arabic string text
+            "all_split_segments": parts,               # Raw list array of all elements split by '#'
+            "profile": useful_profile                  # Key-value dictionary object map
         }
     else:
         return {
             "success": False,
-            "message": "No barcode layout engine could detect a pattern in this image. Check lighting or resolution."
+            "message": "No barcode configuration or patterns could be recognized in this image file."
         }
 
 
