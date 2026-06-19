@@ -4,4 +4,4 @@ gunicorn
 Pillow
 zxing
 python-multipart
-
+pyzbar
