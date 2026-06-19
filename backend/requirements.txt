@@ -3,5 +3,7 @@ uvicorn
 gunicorn
 Pillow
 zxing
+zxing-cpp
 python-multipart
 pyzbar
+opencv-python-headless 
