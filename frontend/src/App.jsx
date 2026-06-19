@@ -88,105 +88,100 @@ function App() {
   };
 
   const cropBarcodeFromVideo = async () => {
-    const video = videoRef.current;
-    const container = containerRef.current;
+  const video = videoRef.current;
+  const container = containerRef.current;
 
-    if (!video || !container) {
-      throw new Error('Camera is not ready.');
-    }
+  if (!video || !container) {
+    throw new Error('Camera is not ready.');
+  }
 
-    if (!video.videoWidth || !video.videoHeight) {
-      throw new Error('Video is not ready yet.');
-    }
+  if (!video.videoWidth || !video.videoHeight) {
+    throw new Error('Video is not ready yet.');
+  }
 
-    const videoW = video.videoWidth;
-    const videoH = video.videoHeight;
+  const videoW = video.videoWidth;
+  const videoH = video.videoHeight;
 
-    const displayW = container.clientWidth;
-    const displayH = container.clientHeight;
+  const displayW = container.clientWidth;
+  const displayH = container.clientHeight;
 
-    const videoRatio = videoW / videoH;
-    const displayRatio = displayW / displayH;
+  const videoRatio = videoW / videoH;
+  const displayRatio = displayW / displayH;
 
-    let renderedW;
-    let renderedH;
-    let offsetX = 0;
-    let offsetY = 0;
+  let renderedW;
+  let renderedH;
+  let offsetX = 0;
+  let offsetY = 0;
 
-    if (videoRatio > displayRatio) {
-      renderedH = displayH;
-      renderedW = displayH * videoRatio;
-      offsetX = (renderedW - displayW) / 2;
-    } else {
-      renderedW = displayW;
-      renderedH = displayW / videoRatio;
-      offsetY = (renderedH - displayH) / 2;
-    }
+  if (videoRatio > displayRatio) {
+    renderedH = displayH;
+    renderedW = displayH * videoRatio;
+    offsetX = (renderedW - displayW) / 2;
+  } else {
+    renderedW = displayW;
+    renderedH = displayW / videoRatio;
+    offsetY = (renderedH - displayH) / 2;
+  }
 
-const boxLeft = displayW * 0.15;
-const boxTop = displayH * 0.69;
-const boxW = displayW * 0.70;
-const boxH = displayH * 0.10;
+  // Match barcodeFrameStyle:
+  // left: 15%, top: 69%, width: 63%, height: 10%
+  const boxLeft = displayW * 0.15;
+  const boxTop = displayH * 0.69;
+  const boxW = displayW * 0.63;
+  const boxH = displayH * 0.10;
 
-    const scaleX = videoW / renderedW;
-    const scaleY = videoH / renderedH;
+  const scaleX = videoW / renderedW;
+  const scaleY = videoH / renderedH;
 
-    const cropX = (boxLeft + offsetX) * scaleX;
-    const cropY = (boxTop + offsetY) * scaleY;
-    const cropW = boxW * scaleX;
-    const cropH = boxH * scaleY;
+  const cropX = (boxLeft + offsetX) * scaleX;
+  const cropY = (boxTop + offsetY) * scaleY;
+  const cropW = boxW * scaleX;
+  const cropH = boxH * scaleY;
 
-    const cropCanvas = document.createElement('canvas');
-    const UPSCALE = 2;
+  const UPSCALE = 2;
 
-cropCanvas.width = Math.round(cropW * UPSCALE);
-cropCanvas.height = Math.round(cropH * UPSCALE);
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = Math.round(cropW * UPSCALE);
+  cropCanvas.height = Math.round(cropH * UPSCALE);
 
-ctx.imageSmoothingEnabled = false;
+  const ctx = cropCanvas.getContext('2d');
 
-ctx.drawImage(
-  video,
-  cropX,
-  cropY,
-  cropW,
-  cropH,
-  0,
-  0,
-  cropCanvas.width,
-  cropCanvas.height
-);
-    const ctx = cropCanvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Could not prepare image crop.');
+  }
 
-    ctx.drawImage(
-      video,
-      cropX,
-      cropY,
-      cropW,
-      cropH,
-      0,
-      0,
-      cropCanvas.width,
-      cropCanvas.height
-    );
+  ctx.imageSmoothingEnabled = false;
 
-    return new Promise((resolve, reject) => {
-      cropCanvas.toBlob(
-        (blob) => {
-          if (!blob) reject(new Error('Could not crop barcode.'));
-          else resolve(blob);
-        },
-        'image/png',
-      );
-    });
-  };
+  ctx.drawImage(
+    video,
+    cropX,
+    cropY,
+    cropW,
+    cropH,
+    0,
+    0,
+    cropCanvas.width,
+    cropCanvas.height
+  );
+
+  return new Promise((resolve, reject) => {
+    cropCanvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('Could not crop barcode.'));
+      } else {
+        resolve(blob);
+      }
+    }, 'image/png');
+  });
+};
 
   const captureImage = async () => {
     try {
       const blob = await cropBarcodeFromVideo();
 
-      const capturedFile = new File([blob], 'syrian-id-barcode-crop.jpg', {
-        type: 'image/png',
-      });
+    const capturedFile = new File([blob], 'syrian-id-barcode-crop.png', {
+  type: 'image/png',
+});
 
       setFile(capturedFile);
       setPreview(URL.createObjectURL(blob));
@@ -349,12 +344,12 @@ const cameraBox = {
   background: '#000',
   borderRadius: 14,
   overflow: 'hidden',
-  maxHeight: '260',
+  height: 260,
 };
 
 const videoStyle = {
   width: '100%',
-  minHeight: 300,
+  height: '100%',
   background: '#000',
   display: 'block',
   objectFit: 'cover',
