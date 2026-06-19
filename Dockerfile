@@ -18,6 +18,8 @@ ENV PYTHONUNBUFFERED 1
 
 # Install os dependencies for our mini vm
 RUN apt-get update && apt-get install -y \
+    # FIX 1: Install Java runtime required by ZXing
+    default-jre \
     # for postgres
     libpq-dev \
     # for Pillow
@@ -43,20 +45,14 @@ COPY ./src /code
 # Install the Python project requirements
 RUN pip install -r /tmp/requirements.txt
 
-# database isn't available during build
-# run any other commands that do not need the database
-# such as:
-# RUN python manage.py collectstatic --noinput
-
 # set the FastAPI project main module
 ARG PROJ_NAME="main"
 
-# create a bash script to run the FastAPI project
-# this script will execute at runtime when
-# the container starts and the database is available
+# FIX 2: Add PYTHONPATH=/code directly into the runtime script so Gunicorn can find main:app
 RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
     printf "RUN_PORT=\"\${PORT:-8000}\"\n\n" >> ./paracord_runner.sh && \
-    printf "gunicorn ${PROJ_NAME}:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind \"[::]:\$RUN_PORT\"\n" >> ./paracord_runner.sh
+    printf "export PYTHONPATH=/code\n" >> ./paracord_runner.sh && \
+    printf "gunicorn ${PROJ_NAME}:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind \"0.0.0.0:\$RUN_PORT\"\n" >> ./paracord_runner.sh
 
 # make the bash script executable
 RUN chmod +x paracord_runner.sh
