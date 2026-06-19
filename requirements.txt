@@ -2,4 +2,4 @@ fastapi>=0.115.8
 uvicorn
 gunicorn
 Pillow
-python-zxing
+zxing
