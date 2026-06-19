@@ -52,21 +52,37 @@ async def decode_barcode(file: UploadFile = File(...)):
     if os.path.exists(temp_filename):
         os.remove(temp_filename)
 
-    # 5. Process results and save to text file with Arabic encoding (utf-8)
+        # 5. Process results and save to text file with Arabic encoding (utf-8)
     if barcode and barcode.parsed:
+        raw_data = barcode.parsed
+        
+        # MOJIBAKE FIX: Convert garbled Latin-1 characters back to raw bytes, 
+        # then cleanly decode them into Arabic.
+        try:
+            # Windows-1256 is the most common encoding for Middle Eastern IDs/cards
+            fixed_data = raw_data.encode('iso-8859-1').decode('windows-1256')
+        except Exception:
+            try:
+                # Fallback to standard ISO Arabic encoding if Windows-1256 fails
+                fixed_data = raw_data.encode('iso-8859-1').decode('iso-8859-6')
+            except Exception:
+                # Final fallback: keep original if everything else fails
+                fixed_data = raw_data
+
         output_txt_file = "barcode_result.txt"
         
-        # Open with encoding="utf-8" to seamlessly support Arabic script text
+        # Open with encoding="utf-8" to seamlessly support the corrected Arabic script text
         with open(output_txt_file, "w", encoding="utf-8") as f:
             f.write(f"=== BARCODE DECODING RESULT ===\n")
             f.write(f"Format: {barcode.format}\n")
-            f.write(f"Data: {barcode.parsed}\n")
+            f.write(f"Original Raw Payload: {raw_data}\n")
+            f.write(f"Fixed Arabic Data: {fixed_data}\n")
             
-        # Terminal/Curl client receives a confirmation instead of the long payload
         return {
             "success": True,
             "message": f"Barcode successfully decoded and saved to server storage as {output_txt_file}"
         }
+
     else:
         return {
             "success": False,
