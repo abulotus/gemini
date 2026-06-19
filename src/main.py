@@ -7,8 +7,13 @@ import io
 
 app = FastAPI()
 
-# Initialize the ZXing reader (it looks for Java automatically)
-reader = zxing.BarCodeReader()
+# Point to the absolute path of the Java binary in the container
+JAVA_PATH = "/usr/bin/java"
+
+if not os.path.exists(JAVA_PATH):
+    reader = zxing.BarCodeReader()
+else:
+    reader = zxing.BarCodeReader(java=JAVA_PATH)
 
 @app.get("/")
 def read_root():
@@ -24,15 +29,11 @@ async def decode_barcode(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Invalid image file format.")
 
     # 2. Crop the image to target the barcode on the back of a card
-    # (Left, Top, Right, Bottom) coordinate bounding box
     width, height = image.size
-    
-    # Example: Cropping the bottom 40% of the card where a barcode usually sits
     left = 0
     top = int(height * 0.60)
     right = width
     bottom = height
-    
     cropped_image = image.crop((left, top, right, bottom))
 
     # 3. Save the cropped image temporarily for ZXing to read
@@ -43,26 +44,33 @@ async def decode_barcode(file: UploadFile = File(...)):
     try:
         barcode = reader.decode(temp_filename)
     except Exception as e:
-        # Clean up file if zxing crashes internally
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
         raise HTTPException(status_code=500, detail=f"ZXing internal error: {str(e)}")
 
-    # Clean up the temporary file
+    # Clean up the temporary cropped image
     if os.path.exists(temp_filename):
         os.remove(temp_filename)
 
-    # 5. Return the result
+    # 5. Process results and save to text file with Arabic encoding (utf-8)
     if barcode and barcode.parsed:
+        output_txt_file = "barcode_result.txt"
+        
+        # Open with encoding="utf-8" to seamlessly support Arabic script text
+        with open(output_txt_file, "w", encoding="utf-8") as f:
+            f.write(f"=== BARCODE DECODING RESULT ===\n")
+            f.write(f"Format: {barcode.format}\n")
+            f.write(f"Data: {barcode.parsed}\n")
+            
+        # Terminal/Curl client receives a confirmation instead of the long payload
         return {
             "success": True,
-            "format": barcode.format,
-            "data": barcode.parsed
+            "message": f"Barcode successfully decoded and saved to server storage as {output_txt_file}"
         }
     else:
         return {
             "success": False,
-            "message": "Barcode found, but could not be cleanly decoded or cropped region missed it."
+            "message": "Barcode found, but could not be cleanly decoded."
         }
 
 if __name__ == "__main__":
