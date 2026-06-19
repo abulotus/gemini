@@ -137,9 +137,24 @@ const boxH = displayH * 0.10;
     const cropH = boxH * scaleY;
 
     const cropCanvas = document.createElement('canvas');
-    cropCanvas.width = Math.round(cropW);
-    cropCanvas.height = Math.round(cropH);
+    const UPSCALE = 2;
 
+cropCanvas.width = Math.round(cropW * UPSCALE);
+cropCanvas.height = Math.round(cropH * UPSCALE);
+
+ctx.imageSmoothingEnabled = false;
+
+ctx.drawImage(
+  video,
+  cropX,
+  cropY,
+  cropW,
+  cropH,
+  0,
+  0,
+  cropCanvas.width,
+  cropCanvas.height
+);
     const ctx = cropCanvas.getContext('2d');
 
     ctx.drawImage(
@@ -160,8 +175,7 @@ const boxH = displayH * 0.10;
           if (!blob) reject(new Error('Could not crop barcode.'));
           else resolve(blob);
         },
-        'image/jpeg',
-        0.95
+        'image/png',
       );
     });
   };
@@ -171,7 +185,7 @@ const boxH = displayH * 0.10;
       const blob = await cropBarcodeFromVideo();
 
       const capturedFile = new File([blob], 'syrian-id-barcode-crop.jpg', {
-        type: 'image/jpeg',
+        type: 'image/png',
       });
 
       setFile(capturedFile);
