@@ -22,4 +22,6 @@ COPY . .
 EXPOSE 8000
 
 # Tell Uvicorn to look inside the 'app' folder for 'main.py' (app.main:app)
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Change the static --port 8000 to use the environment variable $PORT
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+
