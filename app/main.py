@@ -62,7 +62,6 @@ def parse_back_side(lines: list) -> dict:
     return res
 
 def decode_barcode_raw(image_bytes: bytes) -> str:
-    """Extracts the raw string directly from the barcode without fixing encoding yet."""
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
@@ -84,12 +83,10 @@ def decode_barcode_raw(image_bytes: bytes) -> str:
     return barcode.parsed if barcode else ""
 
 def fix_and_parse_barcode(raw_str: str) -> dict:
-    """Decodes string bytes safely to Windows-1256 Arabic and breaks down demographic fields."""
+    """Decodes string bytes safely to Windows-1256 Arabic and splits demographic fields."""
     try:
-        # Step 1: Decode text payload cleanly, ignoring the non-text trailing binary security fields
+        # Re-encode mistake Latin-1 payload back to bytes, then force decode cleanly as Arabic Windows-1256
         cleaned_text = raw_str.encode('latin1', errors='ignore').decode('windows-1256', errors='ignore')
-        
-        # Step 2: Extract sections delimited by '#'
         parts = cleaned_text.split('#')
         
         if len(parts) >= 6:
@@ -112,18 +109,18 @@ async def extract_full_id(front_file: UploadFile, back_file: UploadFile):
         front_bytes = await front_file.read()
         back_bytes = await back_file.read()
         
-        # 1. Fetch text data from front and back side using OCR
+        # 1. Gather OCR extraction data
         front_lines = extract_text_lines(front_bytes)
         back_lines = extract_text_lines(back_bytes)
         
         front_data = parse_front_side(front_lines)
         back_data = parse_back_side(back_lines)
         
-        # 2. Decode Barcode structure
+        # 2. Extract and run our clean decoding translation on the barcode matrix
         raw_barcode_string = decode_barcode_raw(back_bytes)
         barcode_parsed_dict = fix_and_parse_barcode(raw_barcode_string) if raw_barcode_string else None
         
-        # 3. Smart Fallback Layer: If barcode translated cleanly, overwrite missing visual fields
+        # 3. Explicit Fallback Mapping: Inject the Arabic data if visual layout OCR failed
         if barcode_parsed_dict:
             if front_data["first_name"] == "Not Found": 
                 front_data["first_name"] = barcode_parsed_dict["first_name"]
@@ -131,21 +128,21 @@ async def extract_full_id(front_file: UploadFile, back_file: UploadFile):
                 front_data["father_name"] = barcode_parsed_dict["father_name"]
             if front_data["mother_info"] == "Not Found": 
                 front_data["mother_info"] = barcode_parsed_dict["mother_name"]
-            if front_data["surname"] == "Not Found":
-                # Fallback to extract surname from full name lineage block if distinct field isn't present
-                full_name = barcode_parsed_dict["full_name_lineage"]
-                front_data["surname"] = full_name.split(' ')[-1] if ' ' in full_name else full_name
             if front_data["place_and_date_of_birth"] == "Not Found": 
                 front_data["place_and_date_of_birth"] = barcode_parsed_dict["place_and_date_of_birth"]
             if front_data["national_number"] == "Not Found": 
                 front_data["national_number"] = barcode_parsed_dict["national_number"]
+            if front_data["surname"] == "Not Found":
+                # Fallback: parse surname string segment cleanly out of full name lineage field
+                full_name = barcode_parsed_dict["full_name_lineage"]
+                front_data["surname"] = full_name.split(' ')[-1] if ' ' in full_name else full_name
         
         return {
             "status": "success",
             "extracted_data": {
                 "front_side": front_data,
                 "back_side": back_data,
-                "barcode_demographics": barcode_parsed_dict or "Not Readable"
+                "barcode_arabic_extracted": barcode_parsed_dict if barcode_parsed_dict else "Not Readable"
             }
         }
     except Exception as e:
