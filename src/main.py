@@ -52,7 +52,7 @@ async def decode_barcode(file: UploadFile = File(...)):
     if os.path.exists(temp_filename):
         os.remove(temp_filename)
 
-        # 5. Process results and save to text file with Arabic encoding (utf-8)
+    # 5. Process results and save to text file with Arabic encoding (utf-8)
     if barcode and barcode.parsed:
         raw_data = barcode.parsed
         
@@ -69,18 +69,47 @@ async def decode_barcode(file: UploadFile = File(...)):
                 # Final fallback: keep original if everything else fails
                 fixed_data = raw_data
 
-        output_txt_file = "barcode_result.txt"
+        # 6. Structured Data Extraction
+        parts = fixed_data.split('#')
+        useful_profile = {}
         
-        # Open with encoding="utf-8" to seamlessly support the corrected Arabic script text
+        if len(parts) >= 6:
+            useful_profile = {
+                "first_name": parts[0],
+                "last_name": parts[1],
+                "father_name": parts[2],
+                "mother_name": parts[3],
+                "birth_place_and_date": parts[4],
+                "national_number": parts[5]
+            }
+            
+            # Sub-split the place and date of birth if space-separated
+            try:
+                birth_info = parts[4].split(' ')
+                useful_profile["birth_place"] = birth_info[0]
+                useful_profile["birth_date"] = birth_info[1]
+            except Exception:
+                pass
+
+        # 7. Write Structured Data & Payloads into text file
+        output_txt_file = "barcode_result.txt"
         with open(output_txt_file, "w", encoding="utf-8") as f:
-            f.write(f"=== BARCODE DECODING RESULT ===\n")
-            f.write(f"Format: {barcode.format}\n")
-            f.write(f"Original Raw Payload: {raw_data}\n")
+            f.write("=== BARCODE DECODING RESULT ===\n")
+            f.write(f"Format: {barcode.format}\n\n")
+            
+            f.write("--- EXTRACTED PARSED PROFILE ---\n")
+            for key, val in useful_profile.items():
+                f.write(f"{key}: {val}\n")
+            f.write("\n")
+            
+            f.write("--- FULL STRINGS ---\n")
             f.write(f"Fixed Arabic Data: {fixed_data}\n")
+            f.write(f"Original Raw Payload: {raw_data}\n")
             
         return {
             "success": True,
-            "message": f"Barcode successfully decoded and saved to server storage as {output_txt_file}"
+            "message": f"Barcode successfully decoded, structured, and saved to server storage as {output_txt_file}",
+            "profile_preview": useful_profile
         }
 
     else:
