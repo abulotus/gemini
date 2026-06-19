@@ -6,10 +6,15 @@ import os
 from paddleocr import PaddleOCR
 import json
 from fastapi.responses import Response
+import logging
+# Disables debug/info logging output from the core paddle package
+logging.getLogger("ppocr").setLevel(logging.WARNING) 
+
+ocr = PaddleOCR(use_angle_cls=True, lang='ar')
+
 
 app = FastAPI()
 reader = zxing.BarCodeReader()
-ocr = PaddleOCR(use_angle_cls=True, lang='ar', show_log=False)
 
 def extract_text_lines(image_bytes: bytes) -> list:
     nparr = np.frombuffer(image_bytes, np.uint8)
