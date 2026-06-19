@@ -6,7 +6,7 @@ const API_URL =
 
 function App() {
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
+  const containerRef = useRef(null);
   const streamRef = useRef(null);
 
   const [file, setFile] = useState(null);
@@ -35,7 +35,8 @@ function App() {
       }
     };
 
-    setTimeout(attachStream, 200);
+    const timer = setTimeout(attachStream, 200);
+    return () => clearTimeout(timer);
   }, [cameraOpen]);
 
   const startCamera = async () => {
@@ -48,9 +49,20 @@ function App() {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       });
+
+      const track = stream.getVideoTracks()[0];
+      const capabilities = track.getCapabilities?.();
+
+      if (capabilities?.focusMode?.includes('continuous')) {
+        await track.applyConstraints({
+          advanced: [{ focusMode: 'continuous' }],
+        });
+      }
 
       streamRef.current = stream;
       setCameraOpen(true);
@@ -75,46 +87,101 @@ function App() {
     setCameraOpen(false);
   };
 
-  const captureImage = () => {
+  const cropBarcodeFromVideo = async () => {
     const video = videoRef.current;
-    const canvas = canvasRef.current;
+    const container = containerRef.current;
 
-    if (!video || !canvas) {
-      setError('Camera preview is not ready.');
-      return;
+    if (!video || !container) {
+      throw new Error('Camera is not ready.');
     }
 
     if (!video.videoWidth || !video.videoHeight) {
-      setError('Camera is open but video is not ready yet. Wait 1 second and try again.');
-      return;
+      throw new Error('Video is not ready yet.');
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    const videoW = video.videoWidth;
+    const videoH = video.videoHeight;
 
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const displayW = container.clientWidth;
+    const displayH = container.clientHeight;
 
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          setError('Could not capture image.');
-          return;
-        }
+    const videoRatio = videoW / videoH;
+    const displayRatio = displayW / displayH;
 
-        const capturedFile = new File([blob], 'syrian-id-barcode.jpg', {
-          type: 'image/jpeg',
-        });
+    let renderedW;
+    let renderedH;
+    let offsetX = 0;
+    let offsetY = 0;
 
-        setFile(capturedFile);
-        setPreview(URL.createObjectURL(blob));
-        setResult(null);
-        setError(null);
-        stopCamera();
-      },
-      'image/jpeg',
-      0.95
+    if (videoRatio > displayRatio) {
+      renderedH = displayH;
+      renderedW = displayH * videoRatio;
+      offsetX = (renderedW - displayW) / 2;
+    } else {
+      renderedW = displayW;
+      renderedH = displayW / videoRatio;
+      offsetY = (renderedH - displayH) / 2;
+    }
+
+    const boxLeft = displayW * 0.10;
+    const boxTop = displayH * 0.66;
+    const boxW = displayW * 0.80;
+    const boxH = displayH * 0.22;
+
+    const scaleX = videoW / renderedW;
+    const scaleY = videoH / renderedH;
+
+    const cropX = (boxLeft + offsetX) * scaleX;
+    const cropY = (boxTop + offsetY) * scaleY;
+    const cropW = boxW * scaleX;
+    const cropH = boxH * scaleY;
+
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = Math.round(cropW);
+    cropCanvas.height = Math.round(cropH);
+
+    const ctx = cropCanvas.getContext('2d');
+
+    ctx.drawImage(
+      video,
+      cropX,
+      cropY,
+      cropW,
+      cropH,
+      0,
+      0,
+      cropCanvas.width,
+      cropCanvas.height
     );
+
+    return new Promise((resolve, reject) => {
+      cropCanvas.toBlob(
+        (blob) => {
+          if (!blob) reject(new Error('Could not crop barcode.'));
+          else resolve(blob);
+        },
+        'image/jpeg',
+        0.95
+      );
+    });
+  };
+
+  const captureImage = async () => {
+    try {
+      const blob = await cropBarcodeFromVideo();
+
+      const capturedFile = new File([blob], 'syrian-id-barcode-crop.jpg', {
+        type: 'image/jpeg',
+      });
+
+      setFile(capturedFile);
+      setPreview(URL.createObjectURL(blob));
+      setResult(null);
+      setError(null);
+      stopCamera();
+    } catch (err) {
+      setError(err.message || 'Could not capture barcode.');
+    }
   };
 
   const handleUpload = async (e) => {
@@ -134,7 +201,6 @@ function App() {
 
     try {
       const response = await axios.post(API_URL, formData);
-      console.log(response.data);
       setResult(response.data);
     } catch (err) {
       console.error(err);
@@ -159,141 +225,47 @@ function App() {
       <h1>Syrian ID Barcode Decoder</h1>
 
       {!cameraOpen && (
-        <button
-          type="button"
-          onClick={startCamera}
-          style={{
-            width: '100%',
-            padding: 14,
-            fontSize: 16,
-            fontWeight: 600,
-            background: '#16a34a',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-          }}
-        >
+        <button type="button" onClick={startCamera} style={primaryButton}>
           Open Camera
         </button>
       )}
 
       {cameraOpen && (
         <div style={{ marginTop: 20 }}>
-          <div
-            style={{
-              position: 'relative',
-              background: '#000',
-              borderRadius: 14,
-              overflow: 'hidden',
-            }}
-          >
+          <div ref={containerRef} style={cameraBox}>
             <video
               ref={videoRef}
               autoPlay
               playsInline
               muted
               controls={false}
-              style={{
-                width: '100%',
-                minHeight: 300,
-                background: '#000',
-                display: 'block',
-                objectFit: 'cover',
-              }}
+              style={videoStyle}
             />
 
-            {/* Outer ID frame */}
-<div
-  style={{
-    position: 'absolute',
-    left: '3%',
-    top: '18%',
-    width: '94%',
-    height: '52%',
-    border: '3px solid #22c55e',
-    borderRadius: 16,
-    boxSizing: 'border-box',
-    pointerEvents: 'none',
-  }}
-/>
+            <div style={idFrameStyle} />
+            <div style={barcodeFrameStyle} />
 
-{/* Barcode frame */}
-<div
-  style={{
-    position: 'absolute',
-    left: '7%',
-    bottom: '20%',
-    width: '86%',
-    height: '18%',
-    border: '4px dashed #22c55e',
-    borderRadius: 10,
-    boxSizing: 'border-box',
-    pointerEvents: 'none',
-  }}
-/>
-            <div
-              style={{
-                position: 'absolute',
-                left: '8%',
-                right: '8%',
-                bottom: '10%',
-                textAlign: 'center',
-                color: 'white',
-                fontSize: 14,
-                fontWeight: 700,
-                textShadow: '0 2px 4px black',
-                pointerEvents: 'none',
-              }}
-            >
-             ضع الباركود ضمن المربع المنقط
+            <div style={instructionStyle}>
+              ضع الباركود ضمن المربع المنقط
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={captureImage}
-            style={{
-              width: '100%',
-              padding: 14,
-              marginTop: 12,
-              fontSize: 16,
-              fontWeight: 600,
-              background: '#16a34a',
-              color: 'white',
-              border: 'none',
-              borderRadius: 8,
-            }}
-          >
-            Capture Image
+          <button type="button" onClick={captureImage} style={primaryButton}>
+            Capture Barcode
           </button>
 
-          <button
-            type="button"
-            onClick={stopCamera}
-            style={{
-              width: '100%',
-              padding: 12,
-              marginTop: 8,
-              fontSize: 15,
-              background: '#e5e7eb',
-              color: '#111827',
-              border: 'none',
-              borderRadius: 8,
-            }}
-          >
+          <button type="button" onClick={stopCamera} style={secondaryButton}>
             Close Camera
           </button>
         </div>
       )}
 
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
-
       {preview && (
         <div style={{ margin: '20px 0' }}>
-          <h3>Captured Image</h3>
+          <h3>Captured Barcode Crop</h3>
           <img
             src={preview}
-            alt="Captured ID barcode"
+            alt="Captured barcode crop"
             style={{
               width: '100%',
               maxHeight: 260,
@@ -310,44 +282,18 @@ function App() {
           type="submit"
           disabled={loading || !file}
           style={{
-            width: '100%',
-            padding: 14,
-            marginTop: 10,
-            fontSize: 16,
-            fontWeight: 600,
+            ...primaryButton,
             background: loading || !file ? '#9ca3af' : '#111827',
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
           }}
         >
           {loading ? 'Decoding...' : 'Scan Barcode'}
         </button>
       </form>
 
-      {error && (
-        <p
-          style={{
-            color: '#b91c1c',
-            marginTop: 20,
-            background: '#fee2e2',
-            padding: 12,
-            borderRadius: 8,
-          }}
-        >
-          {error}
-        </p>
-      )}
+      {error && <p style={errorStyle}>{error}</p>}
 
       {result && (
-        <div
-          style={{
-            marginTop: 20,
-            padding: 15,
-            background: '#f3f4f6',
-            borderRadius: 8,
-          }}
-        >
+        <div style={resultBox}>
           {result.success ? (
             <>
               <h3>Barcode Detected</h3>
@@ -360,12 +306,7 @@ function App() {
                 readOnly
                 value={result.decoded_arabic_text || ''}
                 rows={6}
-                style={{
-                  width: '100%',
-                  direction: 'rtl',
-                  textAlign: 'right',
-                  fontFamily: 'Tahoma, Arial, sans-serif',
-                }}
+                style={textareaStyle}
               />
 
               {result.profile && (
@@ -388,5 +329,102 @@ function App() {
     </div>
   );
 }
+
+const cameraBox = {
+  position: 'relative',
+  background: '#000',
+  borderRadius: 14,
+  overflow: 'hidden',
+};
+
+const videoStyle = {
+  width: '100%',
+  minHeight: 300,
+  background: '#000',
+  display: 'block',
+  objectFit: 'cover',
+};
+
+const idFrameStyle = {
+  position: 'absolute',
+  left: '3%',
+  top: '18%',
+  width: '94%',
+  height: '52%',
+  border: '3px solid #22c55e',
+  borderRadius: 16,
+  boxSizing: 'border-box',
+  pointerEvents: 'none',
+};
+
+const barcodeFrameStyle = {
+  position: 'absolute',
+  left: '10%',
+  top: '66%',
+  width: '80%',
+  height: '22%',
+  border: '4px dashed #22c55e',
+  borderRadius: 10,
+  boxSizing: 'border-box',
+  pointerEvents: 'none',
+};
+
+const instructionStyle = {
+  position: 'absolute',
+  left: '8%',
+  right: '8%',
+  bottom: '10%',
+  textAlign: 'center',
+  color: 'white',
+  fontSize: 14,
+  fontWeight: 700,
+  textShadow: '0 2px 4px black',
+  pointerEvents: 'none',
+};
+
+const primaryButton = {
+  width: '100%',
+  padding: 14,
+  marginTop: 12,
+  fontSize: 16,
+  fontWeight: 600,
+  background: '#16a34a',
+  color: 'white',
+  border: 'none',
+  borderRadius: 8,
+};
+
+const secondaryButton = {
+  width: '100%',
+  padding: 12,
+  marginTop: 8,
+  fontSize: 15,
+  background: '#e5e7eb',
+  color: '#111827',
+  border: 'none',
+  borderRadius: 8,
+};
+
+const errorStyle = {
+  color: '#b91c1c',
+  marginTop: 20,
+  background: '#fee2e2',
+  padding: 12,
+  borderRadius: 8,
+};
+
+const resultBox = {
+  marginTop: 20,
+  padding: 15,
+  background: '#f3f4f6',
+  borderRadius: 8,
+};
+
+const textareaStyle = {
+  width: '100%',
+  direction: 'rtl',
+  textAlign: 'right',
+  fontFamily: 'Tahoma, Arial, sans-serif',
+};
 
 export default App;
