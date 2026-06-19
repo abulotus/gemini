@@ -1,166 +1,83 @@
-from fastapi import FastAPI, UploadFile, HTTPException
-import cv2
-import numpy as np
-import zxing
 import os
-from paddleocr import PaddleOCR
 import json
-from fastapi.responses import Response
-import logging
-# Disables debug/info logging output from the core paddle package
-logging.getLogger("ppocr").setLevel(logging.WARNING) 
+from fastapi import FastAPI, UploadFile, HTTPException
+from fastapi.responses import JSONResponse
+from paddleocr import PaddleOCR
 
+# 1. Initialize FastAPI app
+app = FastAPI(title="PaddleOCR Arabic API Pipeline")
+
+# 2. Initialize PaddleOCR core engine (forces cache download on first API call)
+# Using 'ar' for Arabic and enabling the direction/angle classifier
 ocr = PaddleOCR(use_angle_cls=True, lang='ar')
 
-
-app = FastAPI()
-reader = zxing.BarCodeReader()
-
-def extract_text_lines(image_bytes: bytes) -> list:
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        return []
-    result = ocr.ocr(img, cls=True)
-    lines = []
-    if result and result[0]:
-        for line in result[0]:
-            lines.append(line[1][0].strip())
-    return lines
-
-def parse_front_side(lines: list) -> dict:
-    res = {
-        "first_name": "Not Found", "surname": "Not Found", "father_name": "Not Found",
-        "mother_info": "Not Found", "place_and_date_of_birth": "Not Found", "national_number": "Not Found"
-    }
-    for i, line in enumerate(lines):
-        if "الاسم" in line:
-            res["first_name"] = line.replace("الاسم", "").strip(" :--_") or (lines[i+1] if i+1 < len(lines) else "Not Found")
-        elif "النسبة" in line or "العائلة" in line:
-            res["surname"] = line.replace("النسبة", "").strip(" :--_") or (lines[i+1] if i+1 < len(lines) else "Not Found")
-        elif "الأب" in line or "الاب" in line:
-            res["father_name"] = line.replace("الأب", "").strip(" :--_") or (lines[i+1] if i+1 < len(lines) else "Not Found")
-        elif "الأم" in line or "الام" in line:
-            res["mother_info"] = line.replace("الأم", "").strip(" :--_") or (lines[i+1] if i+1 < len(lines) else "Not Found")
-        elif "الولادة" in line:
-            res["place_and_date_of_birth"] = line.replace("الولادة", "").strip(" :--_") or (lines[i+1] if i+1 < len(lines) else "Not Found")
+@app.post("/ocr")
+async def process_ocr(file: UploadFile):
+    # Validate that an actual file was uploaded
+    if not file:
+        raise HTTPException(status_code=400, detail="No file uploaded")
         
-        digits = "".join(filter(str.isdigit, line))
-        if len(digits) == 11:
-            res["national_number"] = digits
-    return res
-
-def parse_back_side(lines: list) -> dict:
-    res = {
-        "civil_registry": "Not Found", "record_number": "Not Found", 
-        "gender": "Not Found", "address": "Not Found", "issue_date": "Not Found"
-    }
-    for i, line in enumerate(lines):
-        if "الأمانة" in line or "الامانة" in line:
-            res["civil_registry"] = line.replace("الأمانة", "").strip(" :--_")
-        elif "القيد" in line:
-            res["record_number"] = line.replace("القيد", "").strip(" :--_")
-        elif "الجنس" in line:
-            res["gender"] = line.replace("الجنس", "").strip(" :--_")
-        elif "العنوان" in line:
-            res["address"] = line.replace("العنوان", "").strip(" :--_")
-        elif "المنح" in line:
-            res["issue_date"] = line.replace("تاريخ المنح", "").strip(" :--_")
-    return res
-
-def decode_barcode_raw(image_bytes: bytes) -> str:
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        return ""
-
-    temp_filename = "temp_barcode_proc.png"
-    cv2.imwrite(temp_filename, img)
-    barcode = reader.decode(temp_filename)
+    # Create filenames for temporary environment storage
+    base_name, _ = os.path.splitext(file.filename)
+    temp_image_path = f"/tmp/{file.filename}"
+    output_txt_path = f"/tmp/{base_name}_output.txt"
     
-    if not (barcode and barcode.parsed):
-        h, w, _ = img.shape
-        barcode_region = img[int(h * 0.5):h, 0:w]
-        cv2.imwrite(temp_filename, barcode_region)
-        barcode = reader.decode(temp_filename)
-        
-    if os.path.exists(temp_filename):
-        os.remove(temp_filename)
-        
-    return barcode.parsed if barcode else ""
-
-def fix_and_parse_barcode(raw_str: str) -> dict:
-    """Decodes string bytes safely to Windows-1256 Arabic and splits demographic fields."""
     try:
-        cleaned_text = raw_str.encode('latin1', errors='ignore').decode('windows-1256', errors='ignore')
-        parts = cleaned_text.split('#')
+        # Step 1: Write incoming stream data to a localized temp image file
+        with open(temp_image_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+            
+        # Step 2: Run inference through PaddleOCR engine
+        # result structure: [ [ [ [box coords], (text, confidence) ], ... ] ]
+        raw_result = ocr.ocr(temp_image_path, cls=True)
         
-        if len(parts) >= 6:
-            return {
-                "first_name": parts[0].strip(),
-                "father_name": parts[1].strip(),
-                "mother_name": parts[2].strip(),
-                "full_name_lineage": parts[3].strip(),
-                "place_and_date_of_birth": parts[4].strip(),
-                "national_number": parts[5].strip()
+        # Guard clause for empty/unreadable images
+        if not raw_result or raw_result[0] is None:
+            processed_data = {"filename": file.filename, "extracted_text": [], "structured_lines": []}
+        else:
+            # Step 3: Clean up raw arrays into clean structural mappings
+            extracted_text_only = []
+            structured_lines = []
+            
+            for line in raw_result[0]:
+                box_coordinates = line[0]
+                text_string = line[1][0]
+                confidence_score = float(line[1][1]) # Cast float32 to native python float
+                
+                extracted_text_only.append(text_string)
+                structured_lines.append({
+                    "text": text_string,
+                    "confidence": confidence_score,
+                    "box": box_coordinates
+                })
+                
+            processed_data = {
+                "filename": file.filename,
+                "extracted_text": extracted_text_only,
+                "structured_lines": structured_lines
             }
-    except Exception as e:
-        print(f"Barcode processing fallback warning: {e}")
-    return None
-
-
-@app.post("/api/extract-id-complete")
-async def extract_full_id(front_file: UploadFile, back_file: UploadFile):
-    try:
-        front_bytes = await front_file.read()
-        back_bytes = await back_file.read()
-        
-        # 1. Gather OCR extraction data
-        front_lines = extract_text_lines(front_bytes)
-        back_lines = extract_text_lines(back_bytes)
-        
-        front_data = parse_front_side(front_lines)
-        back_data = parse_back_side(back_lines)
-        
-        # 2. Extract and run our clean decoding translation on the barcode matrix
-        raw_barcode_string = decode_barcode_raw(back_bytes)
-        barcode_parsed_dict = fix_and_parse_barcode(raw_barcode_string) if raw_barcode_string else None
-        
-        # 3. Explicit Fallback Mapping: Inject the Arabic data if visual layout OCR failed
-        if barcode_parsed_dict:
-            if front_data["first_name"] == "Not Found": 
-                front_data["first_name"] = barcode_parsed_dict["first_name"]
-            if front_data["father_name"] == "Not Found": 
-                front_data["father_name"] = barcode_parsed_dict["father_name"]
-            if front_data["mother_info"] == "Not Found": 
-                front_data["mother_info"] = barcode_parsed_dict["mother_name"]
-            if front_data["place_and_date_of_birth"] == "Not Found": 
-                front_data["place_and_date_of_birth"] = barcode_parsed_dict["place_and_date_of_birth"]
-            if front_data["national_number"] == "Not Found": 
-                front_data["national_number"] = barcode_parsed_dict["national_number"]
-            if front_data["surname"] == "Not Found":
-                full_name = barcode_parsed_dict["full_name_lineage"]
-                front_data["surname"] = full_name.split(' ')[-1] if ' ' in full_name else full_name
-        
-        # 4. Create the structured dict payload inside the try block
-        payload = {
+            
+        # Step 4: Serialize the processed data into beautiful JSON format 
+        # and save it explicitly to a text file inside the /tmp folder
+        with open(output_txt_path, "w", encoding="utf-8") as txt_file:
+            json.dump(processed_data, txt_file, ensure_ascii=False, indent=4)
+            
+        # Step 5: Return JSONResponse alongside confirmation path pointers
+        return JSONResponse(content={
             "status": "success",
-            "extracted_data": {
-                "front_side": front_data,
-                "back_side": back_data,
-                "barcode_arabic_extracted": barcode_parsed_dict
-            }
-        }
+            "saved_text_file": output_txt_path,
+            "data": processed_data
+        })
         
-        # Serialize to string with UTF-8 Arabic characters preserved
-        json_string = json.dumps(payload, ensure_ascii=False, indent=4)
-        
-        # Return as a downloadable text file attachment
-        return Response(
-            content=json_string, 
-            media_type="text/plain",
-            headers={"Content-Disposition": "attachment; filename=id_extract_utf8.txt"}
-        )
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
+        
+    finally:
+        # Clean up the incoming source image to maintain server disk space
+        if os.path.exists(temp_image_path):
+            os.remove(temp_image_path)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
