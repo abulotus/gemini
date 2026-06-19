@@ -16,5 +16,5 @@ COPY . .
 
 EXPOSE 8000
 
-# Run uvicorn pointing to the app directory
-CMD ["sh", "-c", "uvicorn app.main:app --app-dir app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Fix: Remove --app-dir because Uvicorn is running from /app and needs to find the 'app' module
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
