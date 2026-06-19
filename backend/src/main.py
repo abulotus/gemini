@@ -18,7 +18,7 @@ app = FastAPI(title="Barcode Decoder API")
 origins = [
     "http://localhost:5173",    # Your local React development server
     "http://127.0.0.1:5173",  # Alternative local address
-     "https://pleasant-dream-production-602b.up.railway.app"
+    "https://bar-front-production.up.railway.app"
      ]
 
 # 2. Add the CORS middleware to the FastAPI app
