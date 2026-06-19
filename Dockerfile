@@ -1,8 +1,9 @@
 FROM python:3.11-slim
 
-# Install system dependencies (JRE for ZXing, and core runtimes required by Paddle/OpenCV)
+# Install system dependencies (including build-essential for compiling PyMuPDF)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     default-jre \
+    build-essential \
     libgomp1 \
     libgl1 \
     libglib2.0-0 \
