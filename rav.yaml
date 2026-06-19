@@ -1,0 +1,14 @@
+# install with pip install rav
+
+scripts:
+  build:
+    - docker build -t fastapi-container .
+  shell:
+    - docker run -it fastapi-container bash
+  run:
+    - docker stop fastapi-container || true
+    - docker run --rm -p 8180:8180 -e PORT=8180 --name fastapi-container fastapi-container
+  stop:
+    - docker stop fastapi-container
+  remove:
+    - docker rm fastapi-container
