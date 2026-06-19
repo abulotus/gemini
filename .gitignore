@@ -12,3 +12,4 @@ Thumbs.db
 # Ignore environment variables and sensitive files
 .env
 config.json
+.DS_Store
