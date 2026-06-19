@@ -1,27 +1,35 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware # Required for frontend communication
 import uvicorn
 import os
 import zxing
 from PIL import Image
 import io
 
+app = FastAPI()
+
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+# ... your other imports (pyzbar, PIL, etc.)
+
 app = FastAPI(title="Barcode Decoder API")
 
-# 1. Define specific origins for CORS security compatibility
+# 1. Define the origins that are allowed to talk to your backend
 origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+    "http://localhost:5173",    # Your local React development server
+    "http://127.0.0.1:5173",  # Alternative local address
     "https://bar-front-production.up.railway.app"
-]
+     ]
 
+# 2. Add the CORS middleware to the FastAPI app
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # Crucial: Specify domains instead of "*" when allow_credentials=True
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=origins,           # Allows requests from your React app
+    allow_credentials=True,
+    allow_methods=["*"],             # Allows all HTTP methods (POST, GET, etc.)
+    allow_headers=["*"],             # Allows all headers
 )
+
 
 JAVA_PATH = "/usr/bin/java"
 if not os.path.exists(JAVA_PATH):
@@ -34,89 +42,78 @@ def read_root():
     return {"status": "healthy", "message": "Bar code processor is ready!"}
 
 @app.post("/decode-barcode")
-@app.post("/decode-barcode")
 async def decode_barcode(file: UploadFile = File(...)):
-    print("\n--- 🚨 NEW DECODE ATTEMPT START 🚨 ---")
-    print(f"Content Type Received: {file.content_type}")
-    
-    # Define a permanent debug path inside your container
-    debug_dir = "/app/debug_uploads"
-    os.makedirs(debug_dir, exist_ok=True)
-    saved_photo_path = os.path.join(debug_dir, "last_uploaded_id.png")
-    json_log_path = os.path.join(debug_dir, "last_decode_result.json")
+    contents = await file.read()
+    try:
+        image = Image.open(io.BytesIO(contents))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image file format.")
+
+    # Crop the image to target the barcode on the back of a card
+    width, height = image.size
+    left = 0
+    top = int(height * 0.60)
+    right = width
+    bottom = height
+    cropped_image = image.crop((left, top, right, bottom))
+
+    temp_filename = "temp_crop.png"
+    cropped_image.save(temp_filename)
 
     try:
-        # Read the file raw bytes
-        image_bytes = await file.read()
-        print(f"Bytes read successfully: {len(image_bytes)} bytes")
-        
-        # Save the exact image to disk immediately for server inspection
-        with open(saved_photo_path, "wb") as f:
-            f.write(image_bytes)
-        print(f"📁 SUCCESS: Raw image saved to server disk at: {saved_photo_path}")
+        barcode = reader.decode(temp_filename)
+    except Exception as e:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+        raise HTTPException(status_code=500, detail=f"ZXing internal error: {str(e)}")
 
-        # Attempt to open with Pillow
+    if os.path.exists(temp_filename):
+        os.remove(temp_filename)
+
+    if barcode and barcode.parsed:
+        raw_data = barcode.parsed
+        
         try:
-            image = Image.open(io.BytesIO(image_bytes))
-            print(f"📸 Pillow parsed image format: {image.format}, size: {image.size}, mode: {image.mode}")
-            
-            if image.mode in ("RGBA", "P"):
-                image = image.convert("RGB")
-                # Save the cropped/converted version too
-                width, height = image.size
-                image = image.crop((0, int(height * 0.60), width, height))
-                image.save(os.path.join(debug_dir, "last_cropped_processed.png"))
-                print("✂️ Cropped image saved successfully.")
-        except Exception as img_err:
-            print(f"❌ PILLOW FAILURE: {str(img_err)}")
-            raise HTTPException(status_code=422, detail=f"Pillow crash: {str(img_err)}")
-
-        # Send to ZXing
-        print("🔍 Invoking ZXing via Java...")
-        barcode = reader.decode(saved_photo_path)
-        
-        # Structure the payload
-        response_data = {"success": False, "message": "No barcode parsed by ZXing."}
-        
-        if barcode and barcode.parsed:
-            raw_data = barcode.parsed
-            print(f"🎉 ZXing parsed string: {raw_data[:30]}...")
-            
+            fixed_data = raw_data.encode('iso-8859-1').decode('windows-1256')
+        except Exception:
             try:
-                fixed_data = raw_data.encode('iso-8859-1').decode('windows-1256')
+                fixed_data = raw_data.encode('iso-8859-1').decode('iso-8859-6')
             except Exception:
                 fixed_data = raw_data
 
-            parts = fixed_data.split('#')
-            useful_profile = {}
-            if len(parts) >= 6:
-                useful_profile = {
-                    "first_name": parts[0], "last_name": parts[1],
-                    "father_name": parts[2], "mother_name": parts[3],
-                    "birth_place_and_date": parts[4], "national_number": parts[5]
-                }
-
-            response_data = {
-                "success": True,
-                "format": barcode.format,
-                "profile": useful_profile,
-                "raw_payload": fixed_data
-            }
+        parts = fixed_data.split('#')
+        useful_profile = {}
         
-        # Write JSON payload onto server disk
-        import json
-        with open(json_log_path, "w", encoding="utf-8") as json_file:
-            json.dump(response_data, json_file, indent=4, ensure_ascii=False)
-        print(f"💾 SUCCESS: JSON result saved to server disk at: {json_log_path}")
+        if len(parts) >= 6:
+            useful_profile = {
+                "first_name": parts[0],
+                "last_name": parts[1],
+                "father_name": parts[2],
+                "mother_name": parts[3],
+                "birth_place_and_date": parts[4],
+                "national_number": parts[5]
+            }
+            
+            try:
+                birth_info = parts[4].split(' ')
+                useful_profile["birth_place"] = birth_info[0]
+                useful_profile["birth_date"] = birth_info[1]
+            except Exception:
+                pass
 
-        return response_data
+        # FIX: Directly return the structured JSON payload to the frontend textarea
+        return {
+            "success": True,
+            "format": barcode.format,
+            "profile": useful_profile,
+            "raw_payload": fixed_data
+        }
 
-    except Exception as e:
-        error_msg = {"success": False, "error": f"Critical API crash: {str(e)}"}
-        print(f"🚨 CRITICAL API CRASH: {str(e)}")
-        with open(json_log_path, "w") as json_file:
-            json.dump(error_msg, json_file)
-        raise HTTPException(status_code=500, detail=str(e))
+    else:
+        return {
+            "success": False,
+            "message": "Barcode found, but could not be cleanly decoded."
+        }
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
