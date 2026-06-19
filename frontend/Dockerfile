@@ -8,11 +8,10 @@ RUN npm run build
 
 # Step 2: Serve the production build using Nginx
 FROM nginx:alpine
-# Copy the built assets from the previous stage to Nginx's HTML folder
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy a custom Nginx configuration to handle React routing correctly
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy the template config over
+COPY nginx.conf /etc/nginx/conf.d/default.template
 
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# Use envsubst to replace ${PORT} in the template and write it to the default config location
+CMD ["/bin/sh", "-c", "envsubst '${PORT}' < /etc/nginx/conf.d/default.template > /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"]
