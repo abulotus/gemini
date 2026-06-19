@@ -9,14 +9,6 @@ app = FastAPI()
 reader = zxing.BarCodeReader()
 ocr = PaddleOCR(use_angle_cls=True, lang='ar', show_log=False)
 
-def fix_arabic_encoding(raw_str: str) -> str:
-    """Fixes Mojibake by casting Latin-1 mis-read strings back to Arabic Windows-1256."""
-    try:
-        # Convert back to raw bytes using the incorrect encoding, then read as Arabic
-        return raw_str.encode('latin1').decode('windows-1256')
-    except Exception:
-        return raw_str # Return original if conversion fails
-
 def extract_text_lines(image_bytes: bytes) -> list:
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -69,11 +61,12 @@ def parse_back_side(lines: list) -> dict:
             res["issue_date"] = line.replace("تاريخ المنح", "").strip(" :--_")
     return res
 
-def decode_barcode(image_bytes: bytes) -> str:
+def decode_barcode_raw(image_bytes: bytes) -> str:
+    """Extracts the raw string directly from the barcode without fixing encoding yet."""
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
-        return "Not Readable"
+        return ""
 
     temp_filename = "temp_barcode_proc.png"
     cv2.imwrite(temp_filename, img)
@@ -88,9 +81,30 @@ def decode_barcode(image_bytes: bytes) -> str:
     if os.path.exists(temp_filename):
         os.remove(temp_filename)
         
-    if barcode and barcode.parsed:
-        return fix_arabic_encoding(barcode.parsed)
-    return "Not Readable"
+    return barcode.parsed if barcode else ""
+
+def fix_and_parse_barcode(raw_str: str) -> dict:
+    """Decodes string bytes safely to Windows-1256 Arabic and breaks down demographic fields."""
+    try:
+        # Step 1: Decode text payload cleanly, ignoring the non-text trailing binary security fields
+        cleaned_text = raw_str.encode('latin1', errors='ignore').decode('windows-1256', errors='ignore')
+        
+        # Step 2: Extract sections delimited by '#'
+        parts = cleaned_text.split('#')
+        
+        if len(parts) >= 6:
+            return {
+                "first_name": parts[0].strip(),
+                "father_name": parts[1].strip(),
+                "mother_name": parts[2].strip(),
+                "full_name_lineage": parts[3].strip(),
+                "place_and_date_of_birth": parts[4].strip(),
+                "national_number": parts[5].strip()
+            }
+    except Exception as e:
+        print(f"Barcode processing fallback warning: {e}")
+    return None
+
 
 @app.post("/api/extract-id-complete")
 async def extract_full_id(front_file: UploadFile, back_file: UploadFile):
@@ -98,40 +112,40 @@ async def extract_full_id(front_file: UploadFile, back_file: UploadFile):
         front_bytes = await front_file.read()
         back_bytes = await back_file.read()
         
-        # 1. Decode Barcode first (safest and most accurate data pool)
-        decoded_barcode_str = decode_barcode(back_bytes)
-        
-        # 2. Run fallback OCR extraction
+        # 1. Fetch text data from front and back side using OCR
         front_lines = extract_text_lines(front_bytes)
         back_lines = extract_text_lines(back_bytes)
         
         front_data = parse_front_side(front_lines)
         back_data = parse_back_side(back_lines)
         
-        # 3. Smart Fallback: If barcode read successfully, parse it to fill empty OCR slots
-        if decoded_barcode_str and "#" in decoded_barcode_str:
-            parts = decoded_barcode_str.split('#')
-            # Typical Syrian ID barcode segments: Card Holder Name # Father Name # Mother Name # Birth Info # National Num
-            if len(parts) >= 6:
-                if front_data["first_name"] == "Not Found": 
-                    front_data["first_name"] = parts[0]
-                if front_data["surname"] == "Not Found" and len(parts) > 3: 
-                    front_data["surname"] = parts[3].split(' ')[-1] if ' ' in parts[3] else parts[1]
-                if front_data["father_name"] == "Not Found": 
-                    front_data["father_name"] = parts[1]
-                if front_data["mother_info"] == "Not Found": 
-                    front_data["mother_info"] = parts[2]
-                if front_data["place_and_date_of_birth"] == "Not Found": 
-                    front_data["place_and_date_of_birth"] = parts[4]
-                if front_data["national_number"] == "Not Found": 
-                    front_data["national_number"] = parts[5]
+        # 2. Decode Barcode structure
+        raw_barcode_string = decode_barcode_raw(back_bytes)
+        barcode_parsed_dict = fix_and_parse_barcode(raw_barcode_string) if raw_barcode_string else None
+        
+        # 3. Smart Fallback Layer: If barcode translated cleanly, overwrite missing visual fields
+        if barcode_parsed_dict:
+            if front_data["first_name"] == "Not Found": 
+                front_data["first_name"] = barcode_parsed_dict["first_name"]
+            if front_data["father_name"] == "Not Found": 
+                front_data["father_name"] = barcode_parsed_dict["father_name"]
+            if front_data["mother_info"] == "Not Found": 
+                front_data["mother_info"] = barcode_parsed_dict["mother_name"]
+            if front_data["surname"] == "Not Found":
+                # Fallback to extract surname from full name lineage block if distinct field isn't present
+                full_name = barcode_parsed_dict["full_name_lineage"]
+                front_data["surname"] = full_name.split(' ')[-1] if ' ' in full_name else full_name
+            if front_data["place_and_date_of_birth"] == "Not Found": 
+                front_data["place_and_date_of_birth"] = barcode_parsed_dict["place_and_date_of_birth"]
+            if front_data["national_number"] == "Not Found": 
+                front_data["national_number"] = barcode_parsed_dict["national_number"]
         
         return {
             "status": "success",
             "extracted_data": {
                 "front_side": front_data,
                 "back_side": back_data,
-                "barcode_decoded_payload": decoded_barcode_str
+                "barcode_demographics": barcode_parsed_dict or "Not Readable"
             }
         }
     except Exception as e:
