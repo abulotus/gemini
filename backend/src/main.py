@@ -34,93 +34,89 @@ def read_root():
     return {"status": "healthy", "message": "Bar code processor is ready!"}
 
 @app.post("/decode-barcode")
+@app.post("/decode-barcode")
 async def decode_barcode(file: UploadFile = File(...)):
-    if not file.content_type.startswith("image/"):
-        print(f"❌ REJECTED: Invalid content type: {file.content_type}")
-        raise HTTPException(status_code=400, detail="File provided is not an image.")
+    print("\n--- 🚨 NEW DECODE ATTEMPT START 🚨 ---")
+    print(f"Content Type Received: {file.content_type}")
     
+    # Define a permanent debug path inside your container
+    debug_dir = "/app/debug_uploads"
+    os.makedirs(debug_dir, exist_ok=True)
+    saved_photo_path = os.path.join(debug_dir, "last_uploaded_id.png")
+    json_log_path = os.path.join(debug_dir, "last_decode_result.json")
+
     try:
+        # Read the file raw bytes
         image_bytes = await file.read()
-        print(f"📸 Image received. Size: {len(image_bytes)} bytes")
+        print(f"Bytes read successfully: {len(image_bytes)} bytes")
         
+        # Save the exact image to disk immediately for server inspection
+        with open(saved_photo_path, "wb") as f:
+            f.write(image_bytes)
+        print(f"📁 SUCCESS: Raw image saved to server disk at: {saved_photo_path}")
+
+        # Attempt to open with Pillow
         try:
             image = Image.open(io.BytesIO(image_bytes))
+            print(f"📸 Pillow parsed image format: {image.format}, size: {image.size}, mode: {image.mode}")
+            
+            if image.mode in ("RGBA", "P"):
+                image = image.convert("RGB")
+                # Save the cropped/converted version too
+                width, height = image.size
+                image = image.crop((0, int(height * 0.60), width, height))
+                image.save(os.path.join(debug_dir, "last_cropped_processed.png"))
+                print("✂️ Cropped image saved successfully.")
         except Exception as img_err:
-            print(f"❌ PILLOW CRASH: Failed to parse image bytes: {str(img_err)}")
-            raise HTTPException(status_code=422, detail="Invalid or corrupt image format.")
+            print(f"❌ PILLOW FAILURE: {str(img_err)}")
+            raise HTTPException(status_code=422, detail=f"Pillow crash: {str(img_err)}")
 
-        if image.mode in ("RGBA", "P"):
-            image = image.convert("RGB")
+        # Send to ZXing
+        print("🔍 Invoking ZXing via Java...")
+        barcode = reader.decode(saved_photo_path)
         
-        # Crop the image to target the barcode on the back of a card
-        width, height = image.size
-        left = 0
-        top = int(height * 0.60)
-        right = width
-        bottom = height
-        cropped_image = image.crop((left, top, right, bottom))
-
-        temp_filename = "temp_crop.png"
-        cropped_image.save(temp_filename)
-        print("🔍 Saved cropped image. Sending to ZXing...")
-
-        try:
-            barcode = reader.decode(temp_filename)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"ZXing internal error: {str(e)}")
-        finally:
-            if os.path.exists(temp_filename):
-                os.remove(temp_filename)
-
+        # Structure the payload
+        response_data = {"success": False, "message": "No barcode parsed by ZXing."}
+        
         if barcode and barcode.parsed:
             raw_data = barcode.parsed
-            print(f"✅ ZXing successfully parsed barcode raw data")
+            print(f"🎉 ZXing parsed string: {raw_data[:30]}...")
             
             try:
                 fixed_data = raw_data.encode('iso-8859-1').decode('windows-1256')
             except Exception:
-                try:
-                    fixed_data = raw_data.encode('iso-8859-1').decode('iso-8859-6')
-                except Exception:
-                    fixed_data = raw_data
+                fixed_data = raw_data
 
             parts = fixed_data.split('#')
             useful_profile = {}
-            
             if len(parts) >= 6:
                 useful_profile = {
-                    "first_name": parts[0],
-                    "last_name": parts[1],
-                    "father_name": parts[2],
-                    "mother_name": parts[3],
-                    "birth_place_and_date": parts[4],
-                    "national_number": parts[5]
+                    "first_name": parts[0], "last_name": parts[1],
+                    "father_name": parts[2], "mother_name": parts[3],
+                    "birth_place_and_date": parts[4], "national_number": parts[5]
                 }
-                
-                try:
-                    birth_info = parts[4].split(' ')
-                    useful_profile["birth_place"] = birth_info[0]
-                    useful_profile["birth_date"] = birth_info[1]
-                except Exception:
-                    pass
 
-            return {
+            response_data = {
                 "success": True,
                 "format": barcode.format,
                 "profile": useful_profile,
                 "raw_payload": fixed_data
             }
-        else:
-            return {
-                "success": False,
-                "message": "No barcode detected or could not be cleanly decoded."
-            }
-            
-    except HTTPException as http_ex:
-        raise http_ex
+        
+        # Write JSON payload onto server disk
+        import json
+        with open(json_log_path, "w", encoding="utf-8") as json_file:
+            json.dump(response_data, json_file, indent=4, ensure_ascii=False)
+        print(f"💾 SUCCESS: JSON result saved to server disk at: {json_log_path}")
+
+        return response_data
+
     except Exception as e:
-        print(f"🚨 CRITICAL BACKEND ERROR: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+        error_msg = {"success": False, "error": f"Critical API crash: {str(e)}"}
+        print(f"🚨 CRITICAL API CRASH: {str(e)}")
+        with open(json_log_path, "w") as json_file:
+            json.dump(error_msg, json_file)
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
