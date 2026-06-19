@@ -13,3 +13,4 @@ Thumbs.db
 .env
 config.json
 .DS_Store
+app/main.py

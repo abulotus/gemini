@@ -9,97 +9,118 @@ import os
 app = FastAPI()
 reader = zxing.BarCodeReader()
 
-def extract_text_from_image(image_bytes: bytes) -> str:
-    """Pre-processes the image and extracts text using Tesseract OCR."""
+def clean_and_threshold_image(image_bytes: bytes):
+    """Cleans up phone shadows and sharpens text for OCR."""
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("Invalid image file.")
     
+    # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    resized = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     
-    custom_config = r'--oem 3 --psm 6 -l ara'
-    return pytesseract.image_to_string(resized, config=custom_config)
+    # Use Adaptive Thresholding to handle uneven lighting/shadows from phone cameras
+    processed = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
+    
+    # Upscale slightly to make small ID text easier to read
+    resized = cv2.resize(processed, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    return resized
+
+def extract_text_from_image(image_bytes: bytes) -> str:
+    """Extracts text using Tesseract with Arabic settings."""
+    processed_img = clean_and_threshold_image(image_bytes)
+    custom_config = r'--oem 3 --psm 4 -l ara' # PSM 4 assumes a single column of text with varying sizes
+    return pytesseract.image_to_string(processed_img, config=custom_config)
 
 def parse_front_side(text: str) -> dict:
-    """Parses text fields from the front of the card."""
-    name = re.search(r'الاسم[:\s]*(.+)', text)
-    surname = re.search(r'النسبة[:\s]*(.+)', text)
-    father = re.search(r'اسم الأب[:\s]*(.+)', text)
-    mother = re.search(r'اسم و نسبة الأم[:\s]*(.+)', text)
-    dob = re.search(r'محل و تاريخ الولادة[:\s]*(.+)', text)
-    national_id = re.search(r'الرقم الوطني[:\s]*([\d\-\s]+)', text)
-
-    clean = lambda m: m.group(1).strip().replace('\n', ' ') if m else "Not Found"
-    return {
-        "first_name": clean(name),
-        "surname": clean(surname),
-        "father_name": clean(father),
-        "mother_info": clean(mother),
-        "place_and_date_of_birth": clean(dob),
-        "national_number": clean(national_id).replace(" ", "")
+    """More forgiving parser looking for Arabic keywords anywhere on a line."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    res = {
+        "first_name": "Not Found", "surname": "Not Found", "father_name": "Not Found",
+        "mother_info": "Not Found", "place_and_date_of_birth": "Not Found", "national_number": "Not Found"
     }
+    
+    for line in lines:
+        # Look for keywords dynamically anywhere in the read line
+        if "الاسم" in line:
+            res["first_name"] = line.replace("الاسم", "").strip(" :--_")
+        elif "النسبة" in line or "العائلة" in line:
+            res["surname"] = line.replace("النسبة", "").strip(" :--_")
+        elif "الأب" in line or "الاب" in line:
+            res["father_name"] = line.replace("اسم الأب", "").replace("الأب", "").strip(" :--_")
+        elif "الأم" in line or "الام" in line:
+            res["mother_info"] = line.replace("اسم و نسبة الأم", "").replace("الأم", "").strip(" :--_")
+        elif "الولادة" in line:
+            res["place_and_date_of_birth"] = line.replace("محل و تاريخ الولادة", "").replace("الولادة", "").strip(" :--_")
+            
+    # National number lookup: hunt for any standalone sequence of 11 digits
+    digits_match = re.search(r'\b\d{11}\b', text.replace(" ", "").replace("‌", ""))
+    if digits_match:
+        res["national_number"] = digits_match.group(0)
+        
+    return res
 
 def parse_back_side(text: str) -> dict:
-    """Parses text fields from the back of the card."""
-    registry = re.search(r'الأمانة[:\s]*(.+)', text)
-    record = re.search(r'القيد[:\s]*(.+)', text)
-    gender = re.search(r'الجنس[:\s]*(.+)', text)
-    address = re.search(r'العنوان[:\s]*(.+)', text)
-    issue_date = re.search(r'تاريخ المنح[:\s]*(.+)', text)
-
-    clean = lambda m: m.group(1).strip().replace('\n', ' ') if m else "Not Found"
-    return {
-        "civil_registry": clean(registry),
-        "record_number": clean(record),
-        "gender": clean(gender),
-        "address": clean(address),
-        "issue_date": clean(issue_date)
+    """More forgiving parser for the back details."""
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    res = {
+        "civil_registry": "Not Found", "record_number": "Not Found", 
+        "gender": "Not Found", "address": "Not Found", "issue_date": "Not Found"
     }
+    
+    for line in lines:
+        if "الأمانة" in line or "الامانة" in line:
+            res["civil_registry"] = line.replace("الأمانة", "").strip(" :--_")
+        elif "القيد" in line:
+            res["record_number"] = line.replace("القيد", "").strip(" :--_")
+        elif "الجنس" in line:
+            res["gender"] = line.replace("الجنس", "").strip(" :--_")
+        elif "العنوان" in line:
+            res["address"] = line.replace("العنوان", "").strip(" :--_")
+        elif "المنح" in line:
+            res["issue_date"] = line.replace("تاريخ المنح", "").strip(" :--_")
+            
+    return res
 
 def decode_barcode(image_bytes: bytes) -> str:
-    """Crops the bottom area and parses the PDF417 barcode using ZXing."""
+    """Attempts to decode the PDF417 barcode directly from the whole back image or cropped area."""
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
-        return "Failed to process image for barcode"
-
-    h, w, _ = img.shape
-    barcode_region = img[int(h * 0.6):h, 0:w]
-    
-    temp_filename = "temp_barcode_proc.png"
-    cv2.imwrite(temp_filename, barcode_region)
-    
-    try:
-        barcode = reader.decode(temp_filename)
-        return barcode.parsed if barcode and barcode.parsed else "Not Readable"
-    except Exception:
         return "Not Readable"
-    finally:
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
+
+    temp_filename = "temp_barcode_proc.png"
+    
+    # Try decoding the full image first, then try a crop if it fails
+    cv2.imwrite(temp_filename, img)
+    barcode = reader.decode(temp_filename)
+    
+    if not (barcode and barcode.parsed):
+        # Crop lower 40% if the first pass fails
+        h, w, _ = img.shape
+        barcode_region = img[int(h * 0.6):h, 0:w]
+        cv2.imwrite(temp_filename, barcode_region)
+        barcode = reader.decode(temp_filename)
+        
+    if os.path.exists(temp_filename):
+        os.remove(temp_filename)
+        
+    return barcode.parsed if barcode and barcode.parsed else "Not Readable"
 
 @app.post("/api/extract-id-complete")
-async def extract_full_id(
-    front_file: UploadFile, 
-    back_file: UploadFile
-):
-    valid_types = ["image/jpeg", "image/png"]
-    if front_file.content_type not in valid_types or back_file.content_type not in valid_types:
-        raise HTTPException(status_code=400, detail="Both files must be JPEG or PNG images.")
-    
+async def extract_full_id(front_file: UploadFile, back_file: UploadFile):
     try:
-        # Read file uploads
         front_bytes = await front_file.read()
         back_bytes = await back_file.read()
         
-        # Run extractions
         front_text = extract_text_from_image(front_bytes)
         back_text = extract_text_from_image(back_bytes)
         barcode_data = decode_barcode(back_bytes)
         
-        # Structure the payload
         return {
             "status": "success",
             "extracted_data": {
@@ -109,4 +130,4 @@ async def extract_full_id(
             }
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Processing pipeline failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
