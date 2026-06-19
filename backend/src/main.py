@@ -1,35 +1,28 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware # Required for frontend communication
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
 import zxing
 from PIL import Image
 import io
 
-app = FastAPI()
-
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-# ... your other imports (pyzbar, PIL, etc.)
-
+# ONLY ONE INSTANCE OF APP REQUIRED
 app = FastAPI(title="Barcode Decoder API")
 
-# 1. Define the origins that are allowed to talk to your backend
+# Define the origins allowed to talk to your backend
 origins = [
-    "http://localhost:5173",    # Your local React development server
-    "http://127.0.0.1:5173",  # Alternative local address
+    "http://localhost:5173",    
+    "http://127.0.0.1:5173",  
     "https://bar-front-production.up.railway.app"
-     ]
+]
 
-# 2. Add the CORS middleware to the FastAPI app
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,           # Allows requests from your React app
+    allow_origins=origins,           
     allow_credentials=True,
-    allow_methods=["*"],             # Allows all HTTP methods (POST, GET, etc.)
-    allow_headers=["*"],             # Allows all headers
+    allow_methods=["*"],             
+    allow_headers=["*"],             
 )
-
 
 JAVA_PATH = "/usr/bin/java"
 if not os.path.exists(JAVA_PATH):
@@ -43,6 +36,9 @@ def read_root():
 
 @app.post("/decode-barcode")
 async def decode_barcode(file: UploadFile = File(...)):
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File provided is not an image.")
+
     contents = await file.read()
     try:
         image = Image.open(io.BytesIO(contents))
@@ -57,18 +53,17 @@ async def decode_barcode(file: UploadFile = File(...)):
     bottom = height
     cropped_image = image.crop((left, top, right, bottom))
 
-    temp_filename = "temp_crop.png"
+    # Save to a safe absolute path inside the /code working directory
+    temp_filename = "/code/temp_crop.png"
     cropped_image.save(temp_filename)
 
     try:
         barcode = reader.decode(temp_filename)
     except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ZXing internal error: {str(e)}")
+    finally:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
-        raise HTTPException(status_code=500, detail=f"ZXing internal error: {str(e)}")
-
-    if os.path.exists(temp_filename):
-        os.remove(temp_filename)
 
     if barcode and barcode.parsed:
         raw_data = barcode.parsed
@@ -101,14 +96,12 @@ async def decode_barcode(file: UploadFile = File(...)):
             except Exception:
                 pass
 
-        # FIX: Directly return the structured JSON payload to the frontend textarea
         return {
             "success": True,
             "format": barcode.format,
             "profile": useful_profile,
             "raw_payload": fixed_data
         }
-
     else:
         return {
             "success": False,

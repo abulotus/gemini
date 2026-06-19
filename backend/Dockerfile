@@ -1,68 +1,40 @@
-# Set the python version as a build-time argument
-# with Python 3.12 as the default
 ARG PYTHON_VERSION=3.12-slim-bullseye
 FROM python:${PYTHON_VERSION}
 
-# Create a virtual environment
-RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/code
 
-# Set the virtual environment as the current location
-ENV PATH=/opt/venv/bin:$PATH
-
-# Upgrade pip
-RUN pip install --upgrade pip
-
-# Set Python-related environment variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-
-# Install os dependencies for our mini vm
-RUN apt-get update && apt-get install -y \
-    # FIX 1: Install Java runtime required by ZXing
+# Install system dependencies including a stable Java runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
     default-jre \
-    # for postgres
     libpq-dev \
-    # for Pillow
     libjpeg-dev \
-    # for CairoSVG
     libcairo2 \
-    # other
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Create the mini vm's code directory
-RUN mkdir -p /code
+# Set up virtual environment
+RUN python -m venv /opt/venv \
+    && pip install --no-cache-dir --upgrade pip
 
-# Set the working directory to that same code directory
 WORKDIR /code
 
-# Copy the requirements file into the container
+# Copy requirements first to take advantage of Docker caching layers
 COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# copy the project code into the container's working directory
-COPY ./src /code
+# Copy your source folder contents into /code
+COPY ./src /code/
 
-# Install the Python project requirements
-RUN pip install -r /tmp/requirements.txt
+# Create the startup shell script securely
+RUN printf "#!/bin/bash\n\
+RUN_PORT=\"\${PORT:-8000}\"\n\
+exec gunicorn main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:\$RUN_PORT\n" > ./paracord_runner.sh \
+    && chmod +x paracord_runner.sh
 
-# set the FastAPI project main module
-ARG PROJ_NAME="main"
+# Ensure the debug uploads directory exists and has permissions
+RUN mkdir -p /code/debug_uploads && chmod 777 /code/debug_uploads
 
-# FIX 2: Add PYTHONPATH=/code directly into the runtime script so Gunicorn can find main:app
-RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
-    printf "RUN_PORT=\"\${PORT:-8000}\"\n\n" >> ./paracord_runner.sh && \
-    printf "export PYTHONPATH=/code\n" >> ./paracord_runner.sh && \
-    printf "gunicorn ${PROJ_NAME}:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind \"0.0.0.0:\$RUN_PORT\"\n" >> ./paracord_runner.sh
-
-# make the bash script executable
-RUN chmod +x paracord_runner.sh
-
-# Clean up apt cache to reduce image size
-RUN apt-get remove --purge -y \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Run the FastAPI project via the runtime script
-# when the container starts
-CMD ./paracord_runner.sh
+CMD ["./paracord_runner.sh"]
