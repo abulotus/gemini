@@ -5,5 +5,4 @@ opencv-python-headless==4.9.0.80
 numpy>=1.24.0,<2.0.0
 zxing
 paddlepaddle==2.6.2
-paddlex==2.1.0
 paddleocr==2.7.3
