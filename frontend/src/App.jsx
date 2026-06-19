@@ -126,9 +126,9 @@ function App() {
   // Match barcodeFrameStyle:
   // left: 15%, top: 69%, width: 63%, height: 10%
   const boxLeft = displayW * 0.15;
-  const boxTop = displayH * 0.69;
-  const boxW = displayW * 0.63;
-  const boxH = displayH * 0.10;
+  const boxTop = displayH * 0.60;
+  const boxW = displayW * 0.71;
+  const boxH = displayH * 0.28;
 
   const scaleX = videoW / renderedW;
   const scaleY = videoH / renderedH;
