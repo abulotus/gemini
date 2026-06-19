@@ -202,40 +202,41 @@ function App() {
               }}
             />
 
-            <div
-              style={{
-                position: 'absolute',
-                left: '5%',
-                top: '12%',
-                width: '90%',
-                height: '65%',
-                border: '3px solid #22c55e',
-                borderRadius: 16,
-                boxSizing: 'border-box',
-                pointerEvents: 'none',
-              }}
-            />
+            {/* Outer ID frame */}
+<div
+  style={{
+    position: 'absolute',
+    left: '3%',
+    top: '18%',
+    width: '94%',
+    height: '52%',
+    border: '3px solid #22c55e',
+    borderRadius: 16,
+    boxSizing: 'border-box',
+    pointerEvents: 'none',
+  }}
+/>
 
-            <div
-              style={{
-                position: 'absolute',
-                left: '10%',
-                bottom: '12%',
-                width: '80%',
-                height: '22%',
-                border: '4px dashed #22c55e',
-                borderRadius: 10,
-                boxSizing: 'border-box',
-                pointerEvents: 'none',
-              }}
-            />
-
+{/* Barcode frame */}
+<div
+  style={{
+    position: 'absolute',
+    left: '7%',
+    bottom: '20%',
+    width: '86%',
+    height: '18%',
+    border: '4px dashed #22c55e',
+    borderRadius: 10,
+    boxSizing: 'border-box',
+    pointerEvents: 'none',
+  }}
+/>
             <div
               style={{
                 position: 'absolute',
                 left: '8%',
                 right: '8%',
-                bottom: '4%',
+                bottom: '10%',
                 textAlign: 'center',
                 color: 'white',
                 fontSize: 14,
@@ -244,7 +245,7 @@ function App() {
                 pointerEvents: 'none',
               }}
             >
-              Place the PDF417 barcode inside the dashed green box
+             ضع الباركود ضمن المربع المنقط
             </div>
           </div>
 
