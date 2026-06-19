@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     default-jre \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /workspace
+WORKDIR /
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
