@@ -357,10 +357,10 @@ const videoStyle = {
 
 const idFrameStyle = {
   position: 'absolute',
-  left: '8%',
-  top: '48%',
-  width: '84%',
-  height: '32%',
+  left: '0%',
+  top: '5%',
+  width: '100%',
+  height: '90%',
   border: '3px solid #22c55e',
   borderRadius: 16,
   boxSizing: 'border-box',
@@ -370,9 +370,9 @@ const idFrameStyle = {
 const barcodeFrameStyle = {
   position: 'absolute',
   left: '15%',
-  top: '69%',
-  width: '63%',
-  height: '10%',
+  top: '75%',
+  width: '80%',
+  height: '22%',
   border: '4px dashed #22c55e',
   borderRadius: 8,
   boxSizing: 'border-box',
