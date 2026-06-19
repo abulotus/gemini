@@ -123,10 +123,10 @@ function App() {
       offsetY = (renderedH - displayH) / 2;
     }
 
-    const boxLeft = displayW * 0.15;
-const boxTop = displayH * 0.64;
+const boxLeft = displayW * 0.15;
+const boxTop = displayH * 0.69;
 const boxW = displayW * 0.70;
-const boxH = displayH * 0.12;
+const boxH = displayH * 0.10;
 
     const scaleX = videoW / renderedW;
     const scaleY = videoH / renderedH;
