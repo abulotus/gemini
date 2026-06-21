@@ -55,6 +55,85 @@ def decode_image_with_tempfile(image: Image.Image):
             os.remove(temp_filename)
 
 
+def crop_likely_barcode_area(image: Image.Image):
+    """
+    Attempts to crop the horizontal barcode band from an ID-card/image.
+    Works best for wide PDF417-style barcodes.
+    """
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    img = np.array(image)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+    # Improve contrast
+    gray = cv2.equalizeHist(gray)
+
+    # Detect horizontal/vertical barcode-like edges
+    grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+
+    gradient = cv2.subtract(grad_x, grad_y)
+    gradient = cv2.convertScaleAbs(gradient)
+
+    blurred = cv2.GaussianBlur(gradient, (9, 9), 0)
+
+    _, thresh = cv2.threshold(
+        blurred,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    )
+
+    # Connect barcode bars into one block
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 7))
+    closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+    closed = cv2.erode(closed, None, iterations=1)
+    closed = cv2.dilate(closed, None, iterations=2)
+
+    contours, _ = cv2.findContours(
+        closed,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+
+    if not contours:
+        return image, "no_barcode_crop"
+
+    h, w = gray.shape
+
+    candidates = []
+
+    for c in contours:
+        x, y, bw, bh = cv2.boundingRect(c)
+        area = bw * bh
+        aspect = bw / max(bh, 1)
+
+        # PDF417 barcode: wide, not too tall
+        if aspect >= 2.5 and area > (w * h * 0.01):
+            candidates.append((area, x, y, bw, bh))
+
+    if not candidates:
+        return image, "no_barcode_candidate"
+
+    # Pick largest barcode-like area
+    _, x, y, bw, bh = max(candidates, key=lambda t: t[0])
+
+    # Add margin
+    margin_x = int(bw * 0.08)
+    margin_y = int(bh * 0.35)
+
+    x1 = max(0, x - margin_x)
+    y1 = max(0, y - margin_y)
+    x2 = min(w, x + bw + margin_x)
+    y2 = min(h, y + bh + margin_y)
+
+    cropped = image.crop((x1, y1, x2, y2))
+
+    return cropped, "auto_barcode_crop"
+
+
 def generate_image_variants(image: Image.Image):
     if image.mode != "RGB":
         image = image.convert("RGB")
@@ -174,16 +253,27 @@ async def decode_barcode(file: UploadFile = File(...)):
     if image.mode in ("RGBA", "P"):
         image = image.convert("RGB")
 
+    barcode = None
     decode_method = None
 
     try:
-        barcode, decode_method = try_decode_variants(image)
+        # 1) Try automatic barcode crop first
+        auto_cropped_image, crop_method = crop_likely_barcode_area(image)
+        barcode, method = try_decode_variants(auto_cropped_image)
+
+        if barcode and (barcode.parsed or barcode.raw):
+            decode_method = f"{crop_method}_{method}"
+        else:
+            # 2) Fall back to full image
+            barcode, decode_method = try_decode_variants(image)
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"ZXing execution failure: {str(e)}",
         )
 
+    # 3) Fall back to fixed crop regions
     if not barcode or not (barcode.parsed or barcode.raw):
         width, height = image.size
 
@@ -235,7 +325,6 @@ async def decode_barcode(file: UploadFile = File(...)):
         "all_split_segments": parts,
         "profile": profile,
     }
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
